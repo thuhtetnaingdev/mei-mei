@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: panel_backend/go.mod
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: panel_frontend/package-lock.json
+
+      - name: Prepare dist
+        run: rm -rf dist && mkdir -p dist
+
+      - name: Build panel backend linux amd64
+        run: |
+          mkdir -p dist/panel_backend-linux-amd64
+          cd panel_backend
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ../dist/panel_backend-linux-amd64/panel_backend ./cmd/server
+          cp .env.example ../dist/panel_backend-linux-amd64/.env.example
+          cd ..
+          tar -C dist -czf dist/panel_backend-linux-amd64.tar.gz panel_backend-linux-amd64
+
+      - name: Build panel backend linux arm64
+        run: |
+          mkdir -p dist/panel_backend-linux-arm64
+          cd panel_backend
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o ../dist/panel_backend-linux-arm64/panel_backend ./cmd/server
+          cp .env.example ../dist/panel_backend-linux-arm64/.env.example
+          cd ..
+          tar -C dist -czf dist/panel_backend-linux-arm64.tar.gz panel_backend-linux-arm64
+
+      - name: Build node backend linux amd64
+        run: |
+          mkdir -p dist/node_backend-linux-amd64
+          cd node_backend
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ../dist/node_backend-linux-amd64/node_backend ./cmd/server
+          cp .env.example ../dist/node_backend-linux-amd64/.env.example
+          cd ..
+          tar -C dist -czf dist/node_backend-linux-amd64.tar.gz node_backend-linux-amd64
+
+      - name: Build node backend linux arm64
+        run: |
+          mkdir -p dist/node_backend-linux-arm64
+          cd node_backend
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o ../dist/node_backend-linux-arm64/node_backend ./cmd/server
+          cp .env.example ../dist/node_backend-linux-arm64/.env.example
+          cd ..
+          tar -C dist -czf dist/node_backend-linux-arm64.tar.gz node_backend-linux-arm64
+
+      - name: Build frontend bundle
+        run: |
+          cd panel_frontend
+          npm ci
+          npm run build
+          cd ..
+          mkdir -p dist/panel_frontend
+          cp -R panel_frontend/dist/. dist/panel_frontend/
+          cp panel_frontend/.env.example dist/panel_frontend/.env.example
+          tar -C dist -czf dist/panel_frontend.tar.gz panel_frontend
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/panel_backend-linux-amd64.tar.gz
+            dist/panel_backend-linux-arm64.tar.gz
+            dist/node_backend-linux-amd64.tar.gz
+            dist/node_backend-linux-arm64.tar.gz
+            dist/panel_frontend.tar.gz
