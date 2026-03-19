@@ -1,0 +1,472 @@
+package api
+
+import (
+	"log"
+	"net/http"
+	"net/url"
+	"panel_backend/internal/auth"
+	"panel_backend/internal/config"
+	"panel_backend/internal/models"
+	"panel_backend/internal/services"
+	"panel_backend/internal/subscription"
+	"strings"
+	"time"
+
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+)
+
+type Handler struct {
+	cfg                    config.Config
+	jwt                    *auth.JWTManager
+	adminService           *services.AdminService
+	userService            *services.UserService
+	nodeService            *services.NodeService
+	bandwidthReportService *services.BandwidthReportService
+	bandwidthCollector     *services.BandwidthCollectorService
+}
+
+func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
+	userService := services.NewUserService(db)
+	nodeService := services.NewNodeService(db, cfg.NodeSharedToken, timeDurationSeconds(cfg.SyncTimeoutSeconds), userService)
+	bandwidthCollector := services.NewBandwidthCollectorService(services.BandwidthCollectorConfig{
+		DB:              db,
+		NodeSharedToken: cfg.NodeSharedToken,
+		CollectInterval: time.Minute,
+		RequestTimeout:  30 * time.Second,
+		UserService:     userService,
+		NodeService:     nodeService,
+	})
+	return NewRouterWithServices(cfg, db, userService, nodeService, bandwidthCollector)
+}
+
+func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services.UserService, nodeService *services.NodeService, bandwidthCollector *services.BandwidthCollectorService) *gin.Engine {
+	router := gin.Default()
+	router.Use(cors.New(cors.Config{
+		AllowOrigins: []string{
+			"http://localhost:5173",
+			"http://127.0.0.1:5173",
+		},
+		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders: []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		MaxAge:       12 * time.Hour,
+	}))
+
+	handler := &Handler{
+		cfg:                    cfg,
+		jwt:                    auth.NewJWTManager(cfg.JWTSecret),
+		adminService:           services.NewAdminService(db, cfg.AdminUsername, cfg.AdminPassword),
+		userService:            userService,
+		bandwidthReportService: services.NewBandwidthReportService(db),
+		nodeService:            nodeService,
+		bandwidthCollector:     bandwidthCollector,
+	}
+
+	router.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	router.POST("/auth/login", handler.login)
+	router.GET("/subscription/:userId", handler.getSubscription)
+	router.GET("/profiles/singbox/:uuid", handler.getSingboxProfile)
+
+	// Node API endpoints - authenticated via node tokens
+	nodeAPI := router.Group("/api/nodes")
+	{
+		nodeAPI.POST("/bandwidth-report", handler.nodeBandwidthReport)
+	}
+
+	protected := router.Group("/")
+	protected.Use(handler.jwt.Middleware())
+	{
+		protected.POST("/users", handler.createUser)
+		protected.GET("/users", handler.listUsers)
+		protected.GET("/users/:id", handler.getUser)
+		protected.PATCH("/users/:id", handler.updateUser)
+		protected.DELETE("/users/:id", handler.deleteUser)
+
+		protected.POST("/nodes/register", handler.registerNode)
+		protected.POST("/nodes/bootstrap", handler.bootstrapNode)
+		protected.GET("/nodes/bootstrap/:jobId", handler.getBootstrapStatus)
+		protected.GET("/nodes", handler.listNodes)
+		protected.PATCH("/nodes/:id", handler.updateNode)
+		protected.DELETE("/nodes/:id", handler.deleteNode)
+		protected.POST("/nodes/:id/reinstall", handler.reinstallNode)
+		protected.POST("/nodes/sync", handler.syncNodes)
+		protected.POST("/bandwidth/collect", handler.triggerBandwidthCollection)
+		protected.GET("/bandwidth/status", handler.getBandwidthCollectorStatus)
+		protected.GET("/admin/profile", handler.getAdminProfile)
+		protected.PUT("/admin/credentials", handler.updateAdminCredentials)
+	}
+
+	return router
+}
+
+func (h *Handler) login(c *gin.Context) {
+	var body struct {
+		Username string `json:"username" binding:"required"`
+		Password string `json:"password" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if !h.adminService.ValidateCredentials(body.Username, body.Password) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		return
+	}
+
+	token, err := h.jwt.GenerateToken(body.Username)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"token": token})
+}
+
+func (h *Handler) getAdminProfile(c *gin.Context) {
+	c.JSON(http.StatusOK, h.adminService.GetProfile())
+}
+
+func (h *Handler) updateAdminCredentials(c *gin.Context) {
+	var input services.UpdateAdminCredentialsInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	profile, err := h.adminService.UpdateCredentials(input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, profile)
+}
+
+func (h *Handler) createUser(c *gin.Context) {
+	var input services.CreateUserInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user, err := h.userService.Create(input)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, user)
+}
+
+func (h *Handler) listUsers(c *gin.Context) {
+	users, err := h.userService.List()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, users)
+}
+
+func (h *Handler) getUser(c *gin.Context) {
+	user, err := h.userService.GetByID(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+	c.JSON(http.StatusOK, user)
+}
+
+func (h *Handler) updateUser(c *gin.Context) {
+	var input services.UpdateUserInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user, err := h.userService.Update(c.Param("id"), input)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, user)
+}
+
+func (h *Handler) deleteUser(c *gin.Context) {
+	if err := h.userService.Delete(c.Param("id")); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) registerNode(c *gin.Context) {
+	var input services.RegisterNodeInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if input.RegistrationToken != h.cfg.NodeSharedToken {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid registration token"})
+		return
+	}
+
+	node, err := h.nodeService.Register(input)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, node)
+}
+
+func (h *Handler) listNodes(c *gin.Context) {
+	nodes, err := h.nodeService.ListWithRuntimeStatus()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, nodes)
+}
+
+func (h *Handler) updateNode(c *gin.Context) {
+	var input services.UpdateNodeInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	node, err := h.nodeService.Update(c.Param("id"), input)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, node)
+}
+
+func (h *Handler) deleteNode(c *gin.Context) {
+	if err := h.nodeService.Delete(c.Param("id")); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) reinstallNode(c *gin.Context) {
+	var input services.ReinstallNodeInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		// Allow empty body, just set default empty input
+		log.Printf("[reinstall] JSON bind error (may be empty body): %v", err)
+		input = services.ReinstallNodeInput{}
+	}
+
+	log.Printf("[reinstall] Handler called for node %s with input: %+v", c.Param("id"), input)
+
+	result, err := h.nodeService.Reinstall(c.Param("id"), input)
+	if err != nil {
+		log.Printf("[reinstall] Service error: %v", err)
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if !result.Success {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": result.Success,
+			"message": result.Message,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": result.Success,
+		"message": result.Message,
+	})
+}
+
+func (h *Handler) bootstrapNode(c *gin.Context) {
+	var input services.BootstrapNodeInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	job := h.nodeService.StartBootstrap(input)
+	c.JSON(http.StatusAccepted, job)
+}
+
+func (h *Handler) getBootstrapStatus(c *gin.Context) {
+	job, err := h.nodeService.GetBootstrapJob(c.Param("jobId"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "bootstrap job not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, job)
+}
+
+func (h *Handler) syncNodes(c *gin.Context) {
+	users, err := h.userService.ActiveUsers()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	results, err := h.nodeService.SyncAllUsers(users)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"syncedUsers": len(users),
+		"results":     results,
+	})
+}
+
+func (h *Handler) getSubscription(c *gin.Context) {
+	user, err := h.userService.GetByID(c.Param("userId"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	nodes, err := h.nodeService.ListWithRuntimeStatus()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	remoteProfileURL := h.cfg.BasePublicURL + "/profiles/singbox/" + user.UUID
+	importURL := "sing-box://import-remote-profile?url=" + url.QueryEscape(remoteProfileURL) + "&name=" + url.QueryEscape(user.Email)
+
+	c.JSON(http.StatusOK, gin.H{
+		"userId":           user.ID,
+		"uuid":             user.UUID,
+		"subscription":     subscription.Generate(*user, nodes),
+		"nodeLinks":        subscription.GenerateNodeLinks(*user, nodes),
+		"url":              h.cfg.BaseSubscriptionURL + "/" + c.Param("userId"),
+		"remoteProfileUrl": remoteProfileURL,
+		"singboxImportUrl": importURL,
+	})
+}
+
+func (h *Handler) getSingboxProfile(c *gin.Context) {
+	user, err := h.userService.GetByUUID(c.Param("uuid"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	nodes, err := h.nodeService.ListWithRuntimeStatus()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	profile, err := subscription.GenerateSingboxProfile(*user, nodes)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Header("Content-Type", "application/json")
+	c.Header("Content-Disposition", "inline; filename=singbox-"+user.UUID+".json")
+	c.Data(http.StatusOK, "application/json", profile)
+}
+
+// nodeBandwidthReport handles bandwidth usage reports from nodes
+func (h *Handler) nodeBandwidthReport(c *gin.Context) {
+	// Authenticate the node using tokens
+	nodeToken := c.GetHeader("Authorization")
+	controlToken := c.GetHeader("X-Control-Plane-Token")
+	nodeName := c.GetHeader("X-Node-Name")
+
+	if !strings.HasPrefix(nodeToken, "Bearer ") {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing bearer token"})
+		return
+	}
+
+	token := strings.TrimPrefix(nodeToken, "Bearer ")
+
+	// Verify node token by looking up the node in database
+	var node models.Node
+	if err := h.nodeService.GetDB().Where("protocol_token = ? AND name = ?", token, nodeName).First(&node).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid node token or node name"})
+			return
+		}
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "database error"})
+		return
+	}
+
+	// Verify control plane token
+	if controlToken != h.cfg.NodeSharedToken {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid control plane token"})
+		return
+	}
+
+	// Parse the bandwidth report
+	var report services.BandwidthReport
+	if err := c.ShouldBindJSON(&report); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+		return
+	}
+
+	// Process the report
+	if err := h.bandwidthReportService.ProcessReport(report, nodeName); err != nil {
+		log.Printf("[bandwidth-report] processing error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process report: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":   "received",
+		"nodeName": nodeName,
+		"message":  "bandwidth report processed successfully",
+	})
+}
+
+// triggerBandwidthCollection manually triggers bandwidth collection from all nodes
+func (h *Handler) triggerBandwidthCollection(c *gin.Context) {
+	if h.bandwidthCollector == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "bandwidth collector not initialized"})
+		return
+	}
+
+	go func() {
+		if err := h.bandwidthCollector.ForceCollect(); err != nil {
+			log.Printf("[bandwidth-collector] manual collection error: %v", err)
+		}
+	}()
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "collecting",
+		"message": "bandwidth collection triggered successfully",
+	})
+}
+
+// getBandwidthCollectorStatus returns the status of the bandwidth collector service
+func (h *Handler) getBandwidthCollectorStatus(c *gin.Context) {
+	if h.bandwidthCollector == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "bandwidth collector not initialized"})
+		return
+	}
+
+	c.JSON(http.StatusOK, h.bandwidthCollector.GetStatus())
+}
+
+func timeDurationSeconds(seconds int) time.Duration {
+	return time.Duration(seconds) * time.Second
+}

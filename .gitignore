@@ -1,0 +1,77 @@
+# Dependencies
+node_modules/
+vendor/
+
+# Build outputs
+dist/
+build/
+*.exe
+*.exe.meta
+*.dll
+*.so
+*.dylib
+
+# Go
+*.test
+*.out
+coverage.out
+cover.out
+
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.development
+.env.test
+.env.production
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# SQLite
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
+
+# OS
+Thumbs.db
+
+# Panel Backend
+panel_backend/cmd/panel_backend
+panel_backend/data/
+panel_backend/temp/
+
+# Node Backend
+node_backend/cmd/node_backend
+node_backend/data/
+node_backend/temp/
+
+# Panel Frontend
+panel_frontend/dist/
+panel_frontend/build/
+panel_frontend/.vite/
+panel_frontend/tsconfig.tsbuildinfo
+
+# Test artifacts
+tmp/
+temp/
+
+# Certificates and sensitive data
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
