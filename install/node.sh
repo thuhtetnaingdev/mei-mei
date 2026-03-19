@@ -101,7 +101,8 @@ if [[ ! -f "${INSTALL_DIR}/tls.key" || ! -f "${INSTALL_DIR}/tls.crt" ]]; then
   sudo chmod 600 "${INSTALL_DIR}/tls.key"
 fi
 
-sudo tee "${INSTALL_DIR}/sing-box.generated.json" >/dev/null <<EOF
+if [[ ! -f "${INSTALL_DIR}/sing-box.generated.json" ]]; then
+  sudo tee "${INSTALL_DIR}/sing-box.generated.json" >/dev/null <<EOF
 {
   "log": { "level": "info" },
   "inbounds": [],
@@ -112,6 +113,7 @@ sudo tee "${INSTALL_DIR}/sing-box.generated.json" >/dev/null <<EOF
   }
 }
 EOF
+fi
 
 sudo tee "${INSTALL_DIR}/.env" >/dev/null <<EOF
 PORT=${NODE_PORT}
