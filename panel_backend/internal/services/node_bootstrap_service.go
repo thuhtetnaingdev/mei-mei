@@ -1,36 +1,33 @@
 package services
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
-	"crypto/ecdsa"
-	"crypto/elliptic"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"io"
-	"log"
-	"math/big"
 	"net"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"panel_backend/internal/models"
 
 	"github.com/google/uuid"
-	"github.com/pkg/sftp"
 	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/ssh"
+)
+
+const (
+	defaultInstallRepo         = "thuhtetnaingdev/mei-mei"
+	defaultInstallVersion      = "latest"
+	defaultNodeInstallerRawURL = "https://raw.githubusercontent.com/thuhtetnaingdev/mei-mei/main/install/node.sh"
 )
 
 type BootstrapNodeInput struct {
@@ -54,15 +51,13 @@ type BootstrapNodeResult struct {
 }
 
 type bootstrapArtifact struct {
-	tempDir           string
-	tarballPath       string
 	token             string
 	realityPublicKey  string
 	realityPrivateKey string
 	realityShortID    string
 	realityServerName string
-	tlsCertificatePEM string
-	tlsKeyPEM         string
+	sshPrivateKeyPEM  string
+	sshPublicKey      string
 }
 
 func (s *NodeService) BootstrapAndRegister(input BootstrapNodeInput) (*BootstrapNodeResult, error) {
@@ -84,110 +79,67 @@ func (s *NodeService) bootstrapAndRegister(input BootstrapNodeInput, jobID strin
 		s.appendBootstrapLog(jobID, fmt.Sprintf(format, args...))
 	}
 
-	if input.SSHPort == 0 {
-		input.SSHPort = 22
-	}
-	if input.NodePort == 0 {
-		input.NodePort = 9090
-	}
-	if input.VLESSPort == 0 {
-		input.VLESSPort = 443
-	}
-	if input.TUICPort == 0 {
-		input.TUICPort = 8443
-	}
-	if input.Hysteria2Port == 0 {
-		input.Hysteria2Port = 9443
-	}
-	if input.PublicHost == "" {
-		input.PublicHost = input.IP
-	}
-	if input.SingboxReloadCommand == "" {
-		input.SingboxReloadCommand = "systemctl restart meimei-sing-box.service"
-	}
+	normalizeBootstrapInput(&input)
 	addLog("bootstrap started for node %s (%s)", input.Name, input.IP)
 
-	addStep("connecting to VPS over SSH")
-	client, err := s.openSSHClient(input)
+	addStep("connecting to VPS over SSH with password")
+	passwordClient, err := s.openSSHClientWithPassword(input)
 	if err != nil {
 		return nil, fmt.Errorf("ssh connect failed: %w", err)
 	}
-	defer client.Close()
-	addLog("SSH connection established to %s:%d as %s", input.IP, input.SSHPort, input.Username)
+	defer passwordClient.Close()
+	addLog("password SSH connection established to %s:%d as %s", input.IP, input.SSHPort, input.Username)
 
-	arch, archOutput, err := detectRemoteArch(client, input.Password)
+	artifact, err := buildBootstrapArtifact()
 	if err != nil {
-		return nil, fmt.Errorf("detecting remote architecture failed: %w", err)
+		return nil, fmt.Errorf("building bootstrap metadata failed: %w", err)
 	}
-	addStep("detected VPS architecture: " + arch)
-	addLog("remote architecture detection output: %s", archOutput)
 
-	artifact, err := s.buildBootstrapArtifact(arch, input.PublicHost)
+	addStep("installing persistent SSH public key on VPS")
+	if err := installAuthorizedKey(passwordClient, input.Password, artifact.sshPublicKey); err != nil {
+		return nil, fmt.Errorf("installing SSH public key failed: %w", err)
+	}
+	addLog("SSH public key installed successfully")
+
+	addStep("validating key-based SSH access")
+	keyClient, err := s.openSSHClientWithPrivateKey(input.IP, input.SSHPort, input.Username, artifact.sshPrivateKeyPEM)
 	if err != nil {
-		return nil, fmt.Errorf("building node artifact failed: %w", err)
+		return nil, fmt.Errorf("validating SSH private key failed: %w", err)
 	}
-	defer os.RemoveAll(artifact.tempDir)
-	addStep("built Linux node deployment tarball")
-	addLog("bootstrap artifact built in %s", artifact.tempDir)
+	defer keyClient.Close()
+	addLog("key-based SSH validation succeeded")
 
-	addStep("running apt update and apt upgrade")
-	aptOutput, err := runRemoteCommand(client, input.Password, true, "apt update && DEBIAN_FRONTEND=noninteractive apt upgrade -y && apt install -y tar curl ca-certificates && curl -fsSL https://sing-box.app/install.sh | sh")
-	addLog("apt/install output:\n%s", aptOutput)
+	node, err := s.upsertBootstrapNodeRecord(input, artifact)
 	if err != nil {
-		return nil, fmt.Errorf("remote apt bootstrap failed: %w", err)
+		return nil, fmt.Errorf("saving node bootstrap metadata failed: %w", err)
 	}
+	addStep("saved SSH keys and node metadata in control plane")
 
-	addStep("uploading node binary bundle and service files")
-	if err := s.uploadBootstrapFiles(client, input, artifact); err != nil {
-		addLog("file upload failed: %v", err)
-		return nil, fmt.Errorf("uploading files failed: %w", err)
-	}
-	addLog("uploaded tarball, env, certs, and service files to VPS")
-
-	addStep("installing node service")
-	installOutput, err := runRemoteCommand(client, input.Password, true, strings.Join([]string{
-		"mkdir -p /opt/meimei-node",
-		"tar -xzf /tmp/meimei-node-bootstrap/node_backend.tar.gz -C /opt/meimei-node",
-		"install -m 0644 /tmp/meimei-node-bootstrap/node_backend.env /opt/meimei-node/.env",
-		"install -m 0644 /tmp/meimei-node-bootstrap/tls.crt /opt/meimei-node/tls.crt",
-		"install -m 0600 /tmp/meimei-node-bootstrap/tls.key /opt/meimei-node/tls.key",
-		"install -m 0644 /tmp/meimei-node-bootstrap/meimei-node.service /etc/systemd/system/meimei-node.service",
-		"install -m 0644 /tmp/meimei-node-bootstrap/meimei-sing-box.service /etc/systemd/system/meimei-sing-box.service",
-		"chmod +x /opt/meimei-node/node_backend",
-		"systemctl daemon-reload",
-		"systemctl enable meimei-sing-box.service",
-		"systemctl enable --now meimei-node.service",
-	}, " && "))
-	addLog("service installation output:\n%s", installOutput)
+	addStep("running remote node installer")
+	installOutput, err := runSimpleRemoteCommand(keyClient, buildNodeInstallCommand(*node, s.sharedToken))
+	addLog("remote installer output:\n%s", installOutput)
 	if err != nil {
-		return nil, fmt.Errorf("service installation failed: %w", err)
+		return nil, fmt.Errorf("remote node installer failed: %w", err)
 	}
 
-	baseURL := fmt.Sprintf("http://%s:%d", input.IP, input.NodePort)
-	addStep("waiting for node API handshake on " + baseURL)
-	if err := s.waitForNodeStatus(baseURL); err != nil {
-		addLog("node status check failed for %s: %v", baseURL, err)
+	addStep("waiting for node API handshake on " + node.BaseURL)
+	if err := s.waitForNodeStatus(node.BaseURL); err != nil {
+		addLog("node status check failed for %s: %v", node.BaseURL, err)
 		return nil, fmt.Errorf("node did not come online: %w", err)
 	}
-	addLog("node API responded successfully at %s/status", baseURL)
+	addLog("node API responded successfully at %s/status", node.BaseURL)
 
-	node, err := s.Register(RegisterNodeInput{
-		Name:              input.Name,
-		BaseURL:           baseURL,
-		Location:          input.Location,
-		PublicHost:        input.PublicHost,
-		VLESSPort:         input.VLESSPort,
-		TUICPort:          input.TUICPort,
-		Hysteria2Port:     input.Hysteria2Port,
-		RealityPublicKey:  artifact.realityPublicKey,
-		RealityShortID:    artifact.realityShortID,
-		RealityServerName: artifact.realityServerName,
-		ProtocolToken:     artifact.token,
-		SingboxVersion:    "bootstrap-managed",
-		RegistrationToken: s.sharedToken,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("registering node failed: %w", err)
+	now := time.Now()
+	node.HealthStatus = "online"
+	node.LastHeartbeat = &now
+	node.SingboxVersion = "installer-managed"
+	if err := s.db.Model(node).Updates(map[string]interface{}{
+		"health_status":   "online",
+		"last_heartbeat":  &now,
+		"singbox_version": "installer-managed",
+		"last_sync_at":    nil,
+	}).Error; err != nil {
+		return nil, fmt.Errorf("updating node runtime status failed: %w", err)
 	}
 	addStep("registered node in control plane")
 	addLog("node %s registered with public host %s", node.Name, node.PublicHost)
@@ -210,65 +162,31 @@ func (s *NodeService) bootstrapAndRegister(input BootstrapNodeInput, jobID strin
 	}, nil
 }
 
-func (s *NodeService) openSSHClient(input BootstrapNodeInput) (*ssh.Client, error) {
-	config := &ssh.ClientConfig{
-		User:            input.Username,
-		Auth:            []ssh.AuthMethod{ssh.Password(input.Password)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         20 * time.Second,
+func normalizeBootstrapInput(input *BootstrapNodeInput) {
+	if input.SSHPort == 0 {
+		input.SSHPort = 22
 	}
-
-	address := fmt.Sprintf("%s:%d", input.IP, input.SSHPort)
-	return ssh.Dial("tcp", address, config)
-}
-
-func detectRemoteArch(client *ssh.Client, password string) (string, string, error) {
-	output, err := runRemoteCommand(client, password, false, "uname -m")
-	if err != nil {
-		return "", "", err
+	if input.NodePort == 0 {
+		input.NodePort = 9090
 	}
-
-	arch := strings.TrimSpace(output)
-	switch arch {
-	case "x86_64", "amd64":
-		return "amd64", output, nil
-	case "aarch64", "arm64":
-		return "arm64", output, nil
-	default:
-		return "", output, fmt.Errorf("unsupported remote architecture %q", arch)
+	if input.VLESSPort == 0 {
+		input.VLESSPort = 443
+	}
+	if input.TUICPort == 0 {
+		input.TUICPort = 8443
+	}
+	if input.Hysteria2Port == 0 {
+		input.Hysteria2Port = 9443
+	}
+	if input.PublicHost == "" {
+		input.PublicHost = input.IP
+	}
+	if input.SingboxReloadCommand == "" {
+		input.SingboxReloadCommand = "systemctl restart meimei-sing-box.service"
 	}
 }
 
-func (s *NodeService) buildBootstrapArtifact(goarch string, publicHost string) (*bootstrapArtifact, error) {
-	repoRoot, err := filepath.Abs(filepath.Join(".", ".."))
-	if err != nil {
-		return nil, err
-	}
-
-	nodeSourceDir := filepath.Join(repoRoot, "node_backend")
-	if _, err := os.Stat(nodeSourceDir); err != nil {
-		return nil, errors.New("node_backend source directory not found relative to panel_backend")
-	}
-
-	tempDir, err := os.MkdirTemp("", "meimei-node-bootstrap-*")
-	if err != nil {
-		return nil, err
-	}
-
-	binaryPath := filepath.Join(tempDir, "node_backend")
-	cmd := exec.Command("go", "build", "-o", binaryPath, "./cmd/server")
-	cmd.Dir = nodeSourceDir
-	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+goarch, "CGO_ENABLED=0")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("%w: %s", err, string(output))
-	}
-
-	tarballPath := filepath.Join(tempDir, "node_backend.tar.gz")
-	if err := archiveSingleFile(binaryPath, tarballPath, "node_backend", 0o755); err != nil {
-		return nil, err
-	}
-
+func buildBootstrapArtifact() (*bootstrapArtifact, error) {
 	realityPrivateKey, realityPublicKey, err := generateRealityKeypair()
 	if err != nil {
 		return nil, err
@@ -279,127 +197,172 @@ func (s *NodeService) buildBootstrapArtifact(goarch string, publicHost string) (
 		return nil, err
 	}
 
-	tlsCertificatePEM, tlsKeyPEM, err := generateSelfSignedCertificate(publicHost)
+	sshPrivateKeyPEM, sshPublicKey, err := generateSSHKeypair()
 	if err != nil {
 		return nil, err
 	}
 
 	return &bootstrapArtifact{
-		tempDir:           tempDir,
-		tarballPath:       tarballPath,
 		token:             uuid.NewString(),
 		realityPublicKey:  realityPublicKey,
 		realityPrivateKey: realityPrivateKey,
 		realityShortID:    shortID,
 		realityServerName: "www.cloudflare.com",
-		tlsCertificatePEM: tlsCertificatePEM,
-		tlsKeyPEM:         tlsKeyPEM,
+		sshPrivateKeyPEM:  sshPrivateKeyPEM,
+		sshPublicKey:      strings.TrimSpace(sshPublicKey),
 	}, nil
 }
 
-func (s *NodeService) uploadBootstrapFiles(client *ssh.Client, input BootstrapNodeInput, artifact *bootstrapArtifact) error {
-	sftpClient, err := sftp.NewClient(client)
+func generateSSHKeypair() (string, string, error) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return err
-	}
-	defer sftpClient.Close()
-
-	if err := runSimpleRemoteCommand(client, "mkdir -p /tmp/meimei-node-bootstrap"); err != nil {
-		return err
+		return "", "", err
 	}
 
-	if err := uploadFile(sftpClient, artifact.tarballPath, "/tmp/meimei-node-bootstrap/node_backend.tar.gz"); err != nil {
-		return err
+	pkcs8, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	if err != nil {
+		return "", "", err
 	}
 
-	envContent := strings.Join([]string{
-		fmt.Sprintf("PORT=%d", input.NodePort),
-		fmt.Sprintf("NODE_NAME=%s", input.Name),
-		fmt.Sprintf("NODE_TOKEN=%s", artifact.token),
-		fmt.Sprintf("CONTROL_PLANE_SHARED_TOKEN=%s", s.sharedToken),
-		"SINGBOX_CONFIG_PATH=/opt/meimei-node/sing-box.generated.json",
-		fmt.Sprintf("SINGBOX_RELOAD_COMMAND=%s", shellEscapeEnv(input.SingboxReloadCommand)),
-		fmt.Sprintf("PUBLIC_HOST=%s", input.PublicHost),
-		fmt.Sprintf("VLESS_PORT=%d", input.VLESSPort),
-		fmt.Sprintf("TUIC_PORT=%d", input.TUICPort),
-		fmt.Sprintf("HYSTERIA2_PORT=%d", input.Hysteria2Port),
-		fmt.Sprintf("VLESS_REALITY_PRIVATE_KEY=%s", artifact.realityPrivateKey),
-		fmt.Sprintf("VLESS_REALITY_PUBLIC_KEY=%s", artifact.realityPublicKey),
-		fmt.Sprintf("VLESS_REALITY_SHORT_ID=%s", artifact.realityShortID),
-		fmt.Sprintf("VLESS_REALITY_SERVER_NAME=%s", artifact.realityServerName),
-		fmt.Sprintf("VLESS_REALITY_HANDSHAKE_SERVER=%s", artifact.realityServerName),
-		"VLESS_REALITY_HANDSHAKE_PORT=443",
-		"TLS_CERTIFICATE_PATH=/opt/meimei-node/tls.crt",
-		"TLS_KEY_PATH=/opt/meimei-node/tls.key",
-		fmt.Sprintf("TLS_SERVER_NAME=%s", input.PublicHost),
-		"",
-	}, "\n")
+	privatePEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: pkcs8,
+	})
 
-	if err := writeRemoteFile(sftpClient, "/tmp/meimei-node-bootstrap/node_backend.env", envContent, 0o600); err != nil {
-		return err
+	sshPublic, err := ssh.NewPublicKey(publicKey)
+	if err != nil {
+		return "", "", err
 	}
 
-	if err := writeRemoteFile(sftpClient, "/tmp/meimei-node-bootstrap/tls.crt", artifact.tlsCertificatePEM, 0o644); err != nil {
-		return err
+	return string(privatePEM), string(ssh.MarshalAuthorizedKey(sshPublic)), nil
+}
+
+func (s *NodeService) openSSHClientWithPassword(input BootstrapNodeInput) (*ssh.Client, error) {
+	config := &ssh.ClientConfig{
+		User:            input.Username,
+		Auth:            []ssh.AuthMethod{ssh.Password(input.Password)},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         20 * time.Second,
 	}
 
-	if err := writeRemoteFile(sftpClient, "/tmp/meimei-node-bootstrap/tls.key", artifact.tlsKeyPEM, 0o600); err != nil {
-		return err
+	address := net.JoinHostPort(input.IP, strconv.Itoa(input.SSHPort))
+	return ssh.Dial("tcp", address, config)
+}
+
+func (s *NodeService) openSSHClientWithPrivateKey(host string, port int, username, privateKeyPEM string) (*ssh.Client, error) {
+	signer, err := ssh.ParsePrivateKey([]byte(privateKeyPEM))
+	if err != nil {
+		return nil, err
 	}
 
-	serviceContent := `[Unit]
-Description=Meimei Node Backend
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=/opt/meimei-node
-EnvironmentFile=/opt/meimei-node/.env
-ExecStart=/opt/meimei-node/node_backend
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-`
-
-	if err := writeRemoteFile(sftpClient, "/tmp/meimei-node-bootstrap/meimei-node.service", serviceContent, 0o644); err != nil {
-		return err
+	config := &ssh.ClientConfig{
+		User:            username,
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         20 * time.Second,
 	}
 
-	singBoxServiceContent := `[Unit]
-Description=Meimei Sing-box
-After=network.target
+	address := net.JoinHostPort(host, strconv.Itoa(port))
+	return ssh.Dial("tcp", address, config)
+}
 
-[Service]
-Type=simple
-ExecStart=/usr/bin/sing-box run -c /opt/meimei-node/sing-box.generated.json
-Restart=always
-RestartSec=3
+func installAuthorizedKey(client *ssh.Client, password string, authorizedKey string) error {
+	cmd := fmt.Sprintf(
+		"mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && grep -qxF %s ~/.ssh/authorized_keys || printf '%%s\\n' %s >> ~/.ssh/authorized_keys",
+		shellQuote(authorizedKey),
+		shellQuote(authorizedKey),
+	)
+	_, err := runRemoteCommand(client, password, false, cmd)
+	return err
+}
 
-[Install]
-WantedBy=multi-user.target
-`
+func (s *NodeService) upsertBootstrapNodeRecord(input BootstrapNodeInput, artifact *bootstrapArtifact) (*models.Node, error) {
+	baseURL := fmt.Sprintf("http://%s:%d", input.IP, input.NodePort)
+	node := models.Node{
+		Name:              input.Name,
+		BaseURL:           baseURL,
+		Location:          input.Location,
+		SSHHost:           input.IP,
+		SSHPort:           input.SSHPort,
+		SSHUsername:       input.Username,
+		SSHPrivateKey:     artifact.sshPrivateKeyPEM,
+		SSHPublicKey:      artifact.sshPublicKey,
+		PublicHost:        input.PublicHost,
+		VLESSPort:         input.VLESSPort,
+		TUICPort:          input.TUICPort,
+		Hysteria2Port:     input.Hysteria2Port,
+		RealityPublicKey:  artifact.realityPublicKey,
+		RealityShortID:    artifact.realityShortID,
+		RealityServerName: artifact.realityServerName,
+		ProtocolToken:     artifact.token,
+		HealthStatus:      "bootstrap_pending",
+		SingboxVersion:    "installer-managed",
+	}
 
-	return writeRemoteFile(sftpClient, "/tmp/meimei-node-bootstrap/meimei-sing-box.service", singBoxServiceContent, 0o644)
+	if err := s.db.Where(models.Node{Name: input.Name}).Assign(node).FirstOrCreate(&node).Error; err != nil {
+		return nil, err
+	}
+
+	return &node, nil
+}
+
+func buildNodeInstallCommand(node models.Node, sharedToken string) string {
+	scriptURL := defaultNodeInstallerRawURL
+
+	env := []string{
+		"MEIMEI_REPO=" + shellQuote(defaultInstallRepo),
+		"MEIMEI_VERSION=" + shellQuote(defaultInstallVersion),
+		"MEIMEI_NODE_NAME=" + shellQuote(node.Name),
+		"MEIMEI_NODE_PORT=" + shellQuote(strconv.Itoa(extractNodePort(node.BaseURL))),
+		"MEIMEI_PUBLIC_HOST=" + shellQuote(node.PublicHost),
+		"MEIMEI_NODE_TOKEN=" + shellQuote(node.ProtocolToken),
+		"MEIMEI_CONTROL_PLANE_TOKEN=" + shellQuote(sharedToken),
+		"MEIMEI_VLESS_PORT=" + shellQuote(strconv.Itoa(node.VLESSPort)),
+		"MEIMEI_TUIC_PORT=" + shellQuote(strconv.Itoa(node.TUICPort)),
+		"MEIMEI_HYSTERIA2_PORT=" + shellQuote(strconv.Itoa(node.Hysteria2Port)),
+	}
+
+	return strings.Join(append(env, "bash <(curl -fsSL "+shellQuote(scriptURL)+")"), " ")
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
 func (s *NodeService) waitForNodeStatus(baseURL string) error {
-	client := &http.Client{Timeout: 5 * time.Second}
-
-	for attempt := 0; attempt < 15; attempt++ {
-		resp, err := client.Get(baseURL + "/status")
+	deadline := time.Now().Add(90 * time.Second)
+	statusURL := strings.TrimRight(baseURL, "/") + "/status"
+	for time.Now().Before(deadline) {
+		resp, err := s.httpClient.Get(statusURL)
 		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode < 300 {
+			_ = resp.Body.Close()
+			if resp.StatusCode < http.StatusInternalServerError {
 				return nil
 			}
 		}
-
 		time.Sleep(2 * time.Second)
 	}
+	return fmt.Errorf("timeout waiting for %s", statusURL)
+}
 
-	return errors.New("status endpoint did not become ready in time")
+func extractSSHHost(baseURL string) string {
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+	return parsed.Hostname()
+}
+
+func extractNodePort(baseURL string) int {
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return 9090
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil || port == 0 {
+		return 9090
+	}
+	return port
 }
 
 func runRemoteCommand(client *ssh.Client, password string, sudo bool, command string) (string, error) {
@@ -420,7 +383,7 @@ func runRemoteCommand(client *ssh.Client, password string, sudo bool, command st
 			return "", err
 		}
 
-		wrapped := fmt.Sprintf("sudo -S -p '' sh -lc %q", command)
+		wrapped := fmt.Sprintf("sudo -S -p '' bash -lc %q", command)
 		if err := session.Start(wrapped); err != nil {
 			return "", err
 		}
@@ -432,7 +395,7 @@ func runRemoteCommand(client *ssh.Client, password string, sudo bool, command st
 			return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 		}
 	} else {
-		if err := session.Run(fmt.Sprintf("sh -lc %q", command)); err != nil {
+		if err := session.Run(fmt.Sprintf("bash -lc %q", command)); err != nil {
 			return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 		}
 	}
@@ -440,114 +403,23 @@ func runRemoteCommand(client *ssh.Client, password string, sudo bool, command st
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-func runSimpleRemoteCommand(client *ssh.Client, command string) error {
+func runSimpleRemoteCommand(client *ssh.Client, command string) (string, error) {
 	session, err := client.NewSession()
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer session.Close()
 
-	return session.Run(fmt.Sprintf("sh -lc %q", command))
-}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	session.Stdout = &stdout
+	session.Stderr = &stderr
 
-func uploadFile(client *sftp.Client, localPath, remotePath string) error {
-	localFile, err := os.Open(localPath)
-	if err != nil {
-		return err
-	}
-	defer localFile.Close()
-
-	remoteFile, err := client.Create(remotePath)
-	if err != nil {
-		return err
-	}
-	defer remoteFile.Close()
-
-	if _, err := io.Copy(remoteFile, localFile); err != nil {
-		return err
+	if err := session.Run(fmt.Sprintf("bash -lc %q", command)); err != nil {
+		return strings.TrimSpace(stdout.String()), fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 
-	return nil
-}
-
-func writeRemoteFile(client *sftp.Client, remotePath, content string, mode os.FileMode) error {
-	file, err := client.Create(remotePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	if _, err := file.Write([]byte(content)); err != nil {
-		return err
-	}
-
-	return client.Chmod(remotePath, mode)
-}
-
-func archiveSingleFile(sourcePath, targetPath, name string, mode int64) error {
-	source, err := os.Open(sourcePath)
-	if err != nil {
-		return err
-	}
-	defer source.Close()
-
-	target, err := os.Create(targetPath)
-	if err != nil {
-		return err
-	}
-	defer target.Close()
-
-	gzipWriter := gzip.NewWriter(target)
-	defer gzipWriter.Close()
-
-	tarWriter := tar.NewWriter(gzipWriter)
-	defer tarWriter.Close()
-
-	info, err := os.Stat(sourcePath)
-	if err != nil {
-		return err
-	}
-
-	log.Printf("[archive] Archiving file: %s (size: %d bytes)", sourcePath, info.Size())
-
-	header := &tar.Header{
-		Name:    name,
-		Mode:    mode,
-		Size:    info.Size(),
-		ModTime: time.Now(),
-	}
-
-	if err := tarWriter.WriteHeader(header); err != nil {
-		return err
-	}
-
-	written, err := io.Copy(tarWriter, source)
-	if err != nil {
-		return err
-	}
-
-	log.Printf("[archive] Written %d bytes to tar", written)
-
-	if err := tarWriter.Close(); err != nil {
-		return err
-	}
-
-	if err := gzipWriter.Close(); err != nil {
-		return err
-	}
-
-	// Verify final size
-	finalInfo, err := os.Stat(targetPath)
-	if err != nil {
-		return err
-	}
-	log.Printf("[archive] Final tarball size: %d bytes", finalInfo.Size())
-
-	return nil
-}
-
-func shellEscapeEnv(value string) string {
-	return strings.ReplaceAll(value, "\n", " ")
+	return strings.TrimSpace(stdout.String()), nil
 }
 
 func generateRealityKeypair() (string, string, error) {
@@ -573,53 +445,4 @@ func generateRealityShortID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(buf), nil
-}
-
-func generateSelfSignedCertificate(host string) (string, string, error) {
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return "", "", err
-	}
-
-	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	if err != nil {
-		return "", "", err
-	}
-
-	dnsNames := []string{"localhost"}
-	ipAddresses := []net.IP{net.ParseIP("127.0.0.1")}
-	if parsedIP := net.ParseIP(host); parsedIP != nil {
-		ipAddresses = append(ipAddresses, parsedIP)
-	} else if host != "" {
-		dnsNames = append(dnsNames, host)
-	}
-
-	template := &x509.Certificate{
-		SerialNumber: serialNumber,
-		Subject: pkix.Name{
-			CommonName:   "meimei-node",
-			Organization: []string{"Meimei"},
-		},
-		NotBefore:             time.Now().Add(-1 * time.Hour),
-		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-		DNSNames:              dnsNames,
-		IPAddresses:           ipAddresses,
-	}
-
-	certificateDER, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
-	if err != nil {
-		return "", "", err
-	}
-
-	certificatePEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificateDER})
-	privateKeyDER, err := x509.MarshalECPrivateKey(privateKey)
-	if err != nil {
-		return "", "", err
-	}
-	privateKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: privateKeyDER})
-
-	return string(certificatePEM), string(privateKeyPEM), nil
 }

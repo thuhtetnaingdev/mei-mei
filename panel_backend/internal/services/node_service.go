@@ -5,12 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
-	"os"
-	"path/filepath"
 	"panel_backend/internal/models"
-	"strings"
 	"sync"
 	"time"
 
@@ -65,8 +61,8 @@ type SyncUser struct {
 }
 
 type SyncPayloadWithLimits struct {
-	NodeName string      `json:"nodeName"`
-	Users    []SyncUser  `json:"users"`
+	NodeName string     `json:"nodeName"`
+	Users    []SyncUser `json:"users"`
 }
 
 type BootstrapJob struct {
@@ -407,239 +403,52 @@ func (s *NodeService) Reinstall(nodeID string, input ReinstallNodeInput) (*Reins
 		return nil, gorm.ErrRecordNotFound
 	}
 
-	if node.HealthStatus == "offline" {
-		return nil, fmt.Errorf("node is offline and cannot be reinstalled")
+	if node.SSHPrivateKey == "" || node.SSHUsername == "" {
+		return nil, fmt.Errorf("node is missing stored SSH credentials; bootstrap it again before reinstalling")
 	}
 
-	targetArch := input.TargetArch
-	if targetArch == "" {
-		targetArch = "amd64"
+	sshHost := node.SSHHost
+	if sshHost == "" {
+		sshHost = extractSSHHost(node.BaseURL)
+	}
+	if sshHost == "" {
+		return nil, fmt.Errorf("node is missing SSH host information")
 	}
 
-	log.Printf("[reinstall] Building tarball for node %s (arch: %s)", node.Name, targetArch)
-	tarballPath, tempDir, err := s.buildNodeTarball(targetArch)
+	sshPort := node.SSHPort
+	if sshPort == 0 {
+		sshPort = 22
+	}
+
+	client, err := s.openSSHClientWithPrivateKey(sshHost, sshPort, node.SSHUsername, node.SSHPrivateKey)
 	if err != nil {
-		return nil, fmt.Errorf("building node tarball failed: %w", err)
+		return nil, fmt.Errorf("key-based SSH connect failed: %w", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer client.Close()
 
-	log.Printf("[reinstall] Tarball created at %s", tarballPath)
-	return s.sendReinstallRequest(node, tarballPath)
-}
-
-func (s *NodeService) buildNodeTarball(goarch string) (string, string, error) {
-	repoRoot, err := filepath.Abs(filepath.Join(".", ".."))
+	installOutput, err := runSimpleRemoteCommand(client, buildNodeInstallCommand(node, s.sharedToken))
 	if err != nil {
-		return "", "", err
+		return nil, fmt.Errorf("remote node installer failed: %w", err)
 	}
 
-	distDir := filepath.Join(repoRoot, "dist")
-	
-	// Try multiple possible binary paths
-	possiblePaths := []string{
-		filepath.Join(distDir, "node_backend", "node_backend"), // From make release-node
-		filepath.Join(distDir, "node_backend-linux-amd64", "node_backend"),
-		filepath.Join(distDir, "node_backend-linux-arm64", "node_backend"),
-		filepath.Join(distDir, "node_backend"),                  // Direct binary (last resort)
+	message := "node reinstall completed via installer"
+	if installOutput != "" {
+		message = installOutput
 	}
 
-	binaryPath := ""
-	for _, path := range possiblePaths {
-		info, err := os.Stat(path)
-		if err == nil && !info.IsDir() {
-			binaryPath = path
-			log.Printf("[reinstall] Found binary candidate at %s (size: %d bytes)", path, info.Size())
-			break
-		}
+	if err := s.waitForNodeStatus(node.BaseURL); err != nil {
+		return nil, fmt.Errorf("node reinstall ran but node did not come back online: %w", err)
 	}
 
-	if binaryPath == "" {
-		// List what's actually in dist directory
-		entries, _ := os.ReadDir(distDir)
-		var dirContents []string
-		for _, e := range entries {
-			dirContents = append(dirContents, e.Name())
-		}
-		return "", "", fmt.Errorf("node_backend binary not found in %s, found: %v", distDir, dirContents)
-	}
-
-	// Verify it's actually a file with reasonable size
-	info, err := os.Stat(binaryPath)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to stat binary: %w", err)
-	}
-	
-	if info.IsDir() {
-		return "", "", fmt.Errorf("binary path %s is a directory, not a file", binaryPath)
-	}
-	
-	if info.Size() < 1000 {
-		return "", "", fmt.Errorf("binary file %s seems too small (%d bytes), may be corrupted", binaryPath, info.Size())
-	}
-	
-	if info.Size() > 100*1024*1024 {
-		return "", "", fmt.Errorf("binary file %s seems too large (%d bytes), may be wrong file", binaryPath, info.Size())
-	}
-
-	log.Printf("[reinstall] Using binary at %s (size: %d bytes)", binaryPath, info.Size())
-
-	tempDir, err := os.MkdirTemp("", "meimei-node-reinstall-*")
-	if err != nil {
-		return "", "", err
-	}
-
-	tarballPath := filepath.Join(tempDir, "node_backend.tar.gz")
-	if err := archiveSingleFile(binaryPath, tarballPath, "node_backend", 0o755); err != nil {
-		return "", "", err
-	}
-
-	return tarballPath, tempDir, nil
-}
-
-func (s *NodeService) sendReinstallRequest(node models.Node, tarballPath string) (*ReinstallNodeResult, error) {
-	file, err := os.Open(tarballPath)
-	if err != nil {
-		return nil, fmt.Errorf("opening tarball failed: %w", err)
-	}
-	defer file.Close()
-
-	fileInfo, err := file.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("getting file info failed: %w", err)
-	}
-
-	log.Printf("[reinstall] Tarball size: %d bytes", fileInfo.Size())
-
-	body := &bytes.Buffer{}
-	writer := &multipartWriter{
-		buffer: body,
-	}
-
-	if err := writer.WriteField("action", "reinstall"); err != nil {
-		return nil, fmt.Errorf("writing action field failed: %w", err)
-	}
-
-	if err := writer.CreateFormFile("tarball", "node_backend.tar.gz", fileInfo.Size(), file); err != nil {
-		return nil, fmt.Errorf("creating form file failed: %w", err)
-	}
-
-	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("closing multipart writer failed: %w", err)
-	}
-
-	log.Printf("[reinstall] Sending request to %s/reinstall", node.BaseURL)
-	log.Printf("[reinstall] Request body size: %d bytes", body.Len())
-
-	reinstallURL := fmt.Sprintf("%s/reinstall", node.BaseURL)
-
-	req, err := http.NewRequest(http.MethodPost, reinstallURL, body)
-	if err != nil {
-		return nil, fmt.Errorf("creating request failed: %w", err)
-	}
-
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+node.ProtocolToken)
-	req.Header.Set("X-Control-Plane-Token", s.sharedToken)
-
-	log.Printf("[reinstall] Content-Type: %s", writer.FormDataContentType())
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		// If we get EOF, it might mean the service restarted successfully
-		// Check if the error contains EOF
-		if err == io.EOF || strings.Contains(err.Error(), "EOF") {
-			log.Printf("[reinstall] Got EOF (service likely restarted), considering as success")
-			return &ReinstallNodeResult{
-				Success: true,
-				Message: "Reinstall completed (service restarted)",
-			}, nil
-		}
-		log.Printf("[reinstall] HTTP request failed: %v", err)
-		return nil, fmt.Errorf("sending reinstall request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	log.Printf("[reinstall] Response status: %d", resp.StatusCode)
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Printf("[reinstall] Reading response body failed: %v", err)
-		return nil, fmt.Errorf("reading response body failed: %w", err)
-	}
-
-	log.Printf("[reinstall] Response body: %s", string(respBody))
-
-	if resp.StatusCode >= 300 {
-		return &ReinstallNodeResult{
-			Success: false,
-			Message: fmt.Sprintf("node returned status %d: %s", resp.StatusCode, string(respBody)),
-		}, nil
-	}
-
-	var nodeResp struct {
-		Success bool   `json:"success"`
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal(respBody, &nodeResp); err != nil {
-		return &ReinstallNodeResult{
-			Success: true,
-			Message: string(respBody),
-		}, nil
-	}
+	now := time.Now()
+	_ = s.db.Model(&node).Updates(map[string]interface{}{
+		"health_status":   "online",
+		"last_heartbeat":  &now,
+		"singbox_version": "installer-managed",
+	}).Error
 
 	return &ReinstallNodeResult{
-		Success: nodeResp.Success,
-		Message: nodeResp.Message,
+		Success: true,
+		Message: message,
 	}, nil
-}
-
-type multipartWriter struct {
-	buffer      *bytes.Buffer
-	contentType string
-}
-
-func (w *multipartWriter) WriteField(fieldname, value string) error {
-	if w.contentType == "" {
-		boundary := uuid.NewString()
-		w.contentType = "multipart/form-data; boundary=" + boundary
-	}
-	boundary := w.getBoundary()
-
-	_, err := fmt.Fprintf(w.buffer, "--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n%s\r\n", boundary, fieldname, value)
-	return err
-}
-
-func (w *multipartWriter) CreateFormFile(fieldname, filename string, filesize int64, file io.Reader) error {
-	boundary := w.getBoundary()
-
-	_, err := fmt.Fprintf(w.buffer, "--%s\r\nContent-Disposition: form-data; name=\"%s\"; filename=\"%s\"\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n", boundary, fieldname, filename, filesize)
-	if err != nil {
-		return err
-	}
-
-	_, err = io.Copy(w.buffer, file)
-	if err != nil {
-		return err
-	}
-
-	_, err = fmt.Fprintf(w.buffer, "\r\n")
-	return err
-}
-
-func (w *multipartWriter) Close() error {
-	boundary := w.getBoundary()
-	_, err := fmt.Fprintf(w.buffer, "--%s--\r\n", boundary)
-	return err
-}
-
-func (w *multipartWriter) FormDataContentType() string {
-	return w.contentType
-}
-
-func (w *multipartWriter) getBoundary() string {
-	parts := strings.SplitN(w.contentType, "=", 2)
-	if len(parts) < 2 {
-		return "----FormBoundary" + uuid.NewString()
-	}
-	return strings.TrimSpace(parts[1])
 }

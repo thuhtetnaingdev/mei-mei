@@ -7,6 +7,11 @@ type Node struct {
 	Name               string     `json:"name" gorm:"uniqueIndex;not null"`
 	BaseURL            string     `json:"baseUrl" gorm:"not null"`
 	Location           string     `json:"location"`
+	SSHHost            string     `json:"sshHost"`
+	SSHPort            int        `json:"sshPort"`
+	SSHUsername        string     `json:"sshUsername"`
+	SSHPrivateKey      string     `json:"-" gorm:"type:text"`
+	SSHPublicKey       string     `json:"-" gorm:"type:text"`
 	PublicHost         string     `json:"publicHost" gorm:"not null"`
 	VLESSPort          int        `json:"vlessPort"`
 	TUICPort           int        `json:"tuicPort"`
