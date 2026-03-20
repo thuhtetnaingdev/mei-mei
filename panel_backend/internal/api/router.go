@@ -81,7 +81,7 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 		nodeAPI.POST("/bandwidth-report", handler.nodeBandwidthReport)
 	}
 
-	protected := router.Group("/")
+	protected := router.Group("/api")
 	protected.Use(handler.jwt.Middleware())
 	{
 		protected.POST("/users", handler.createUser)
