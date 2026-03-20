@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os"
 	"os/exec"
@@ -33,10 +34,12 @@ type ConfigService struct {
 
 func NewConfigService(cfg config.Config) *ConfigService {
 	tracker := NewBandwidthTracker()
-	return &ConfigService{
+	service := &ConfigService{
 		cfg:              cfg,
 		bandwidthTracker: tracker,
 	}
+	service.restoreTrackedUsersFromConfig()
+	return service
 }
 
 // GetBandwidthTracker returns the bandwidth tracker instance
@@ -109,7 +112,7 @@ func (s *ConfigService) Apply(req ApplyConfigRequest) error {
 	s.mu.Lock()
 	s.lastReload = time.Now()
 	s.lastError = ""
-	s.activeUsers = len(users)
+	s.activeUsers = countEnabledUsers(req.Users)
 	s.mu.Unlock()
 
 	// Update bandwidth tracker with active users
@@ -181,4 +184,93 @@ func (s *ConfigService) setError(message string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastError = message
+}
+
+func countEnabledUsers(users []struct {
+	UUID             string `json:"uuid"`
+	Email            string `json:"email"`
+	Enabled          bool   `json:"enabled"`
+	BandwidthLimitGB int64  `json:"bandwidthLimitGb"`
+}) int {
+	total := 0
+	for _, user := range users {
+		if user.Enabled {
+			total++
+		}
+	}
+	return total
+}
+
+func (s *ConfigService) restoreTrackedUsersFromConfig() {
+	payload, err := os.ReadFile(s.cfg.SingboxConfigPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("[config-service] failed to read existing sing-box config: %v", err)
+		}
+		return
+	}
+
+	type inboundUser struct {
+		UUID     string `json:"uuid"`
+		Name     string `json:"name"`
+		Password string `json:"password"`
+	}
+	type inbound struct {
+		Type  string        `json:"type"`
+		Users []inboundUser `json:"users"`
+	}
+	type generatedConfig struct {
+		Inbounds []inbound `json:"inbounds"`
+	}
+
+	var cfg generatedConfig
+	if err := json.Unmarshal(payload, &cfg); err != nil {
+		log.Printf("[config-service] failed to parse existing sing-box config: %v", err)
+		return
+	}
+
+	seen := make(map[string]bool)
+	trackedUsers := make([]struct {
+		UUID             string
+		Email            string
+		Enabled          bool
+		BandwidthLimitGB int64
+	}, 0)
+
+	for _, inbound := range cfg.Inbounds {
+		for _, user := range inbound.Users {
+			uuid := user.UUID
+			if uuid == "" {
+				uuid = user.Password
+			}
+			if uuid == "" || seen[uuid] {
+				continue
+			}
+
+			seen[uuid] = true
+			trackedUsers = append(trackedUsers, struct {
+				UUID             string
+				Email            string
+				Enabled          bool
+				BandwidthLimitGB int64
+			}{
+				UUID:             uuid,
+				Email:            user.Name,
+				Enabled:          true,
+				BandwidthLimitGB: 0,
+			})
+		}
+	}
+
+	if len(trackedUsers) == 0 {
+		return
+	}
+
+	s.bandwidthTracker.UpdateActiveUsers(trackedUsers)
+
+	s.mu.Lock()
+	s.activeUsers = len(trackedUsers)
+	s.mu.Unlock()
+
+	log.Printf("[config-service] restored %d tracked users from existing sing-box config", len(trackedUsers))
 }

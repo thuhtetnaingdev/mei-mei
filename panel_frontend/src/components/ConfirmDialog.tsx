@@ -41,11 +41,11 @@ export function ConfirmDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-start justify-center bg-slate-950/75 px-4 pb-6 pt-12 backdrop-blur-md md:items-center md:py-6"
+      className="fixed inset-0 z-[100] flex items-start justify-center bg-slate-950/75 px-3 pb-4 pt-4 backdrop-blur-md sm:px-4 sm:pb-6 sm:pt-10 md:items-center md:py-6"
       onClick={onCancel}
     >
       <div
-        className={`relative w-full ${panelWidthClass} rounded-[28px] border border-white/10 bg-[#0d172b] p-6 shadow-panel`.trim()}
+        className={`relative max-h-[calc(100vh-2rem)] w-full overflow-hidden rounded-[28px] border border-white/10 bg-[#0d172b] p-4 shadow-panel sm:max-h-[calc(100vh-3rem)] sm:p-6 ${panelWidthClass}`.trim()}
         onClick={(event) => event.stopPropagation()}
       >
         <button
@@ -58,7 +58,7 @@ export function ConfirmDialog({
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
-        <h3 className="pr-10 font-display text-2xl font-semibold text-white">{title}</h3>
+        <h3 className="pr-10 font-display text-xl font-semibold text-white sm:text-2xl">{title}</h3>
         <p className="mt-3 text-sm leading-6 text-slate-400">{description}</p>
         {children ? <div className="mt-4">{children}</div> : null}
         {hideActions ? null : (

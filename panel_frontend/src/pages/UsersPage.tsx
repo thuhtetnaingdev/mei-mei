@@ -715,7 +715,7 @@ export function UsersPage() {
           description="Manage the full customer access flow from one compact workspace, then open QR and import links without leaving the panel."
           className="!p-4 sm:!p-5"
           action={
-            <button type="button" onClick={openCreateDialog} className="btn-primary gap-2">
+            <button type="button" onClick={openCreateDialog} className="btn-primary w-full justify-center gap-2 sm:w-auto">
               <Plus className="h-4 w-4" />
               Add
             </button>
@@ -738,7 +738,7 @@ export function UsersPage() {
         </SectionCard>
 
         <div className="panel-surface p-4 sm:p-5">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="metric-kicker">Traffic Snapshot</p>
               <h3 className="mt-1.5 font-display text-xl font-semibold text-white">Usage posture</h3>
@@ -913,15 +913,15 @@ export function UsersPage() {
                         )}
                       </div>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button onClick={() => startEdit(user)} className="btn-secondary flex-1">
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <button onClick={() => startEdit(user)} className="btn-secondary w-full justify-center">
                         Edit
                       </button>
-                      <button onClick={() => void openAccess(user)} className="btn-primary flex-1 gap-2">
+                      <button onClick={() => void openAccess(user)} className="btn-primary w-full justify-center gap-2">
                         <QrCode className="h-4 w-4" />
                         QR
                       </button>
-                      <button onClick={() => setDeleteTarget(user)} className="btn-danger flex-1">
+                      <button onClick={() => setDeleteTarget(user)} className="btn-danger w-full justify-center">
                         Delete
                       </button>
                     </div>
@@ -946,7 +946,7 @@ export function UsersPage() {
         onCancel={closeUserDialog}
         onConfirm={() => undefined}
       >
-        <div className="max-h-[calc(85vh-8rem)] overflow-y-auto pr-1">
+        <div className="max-h-[calc(85vh-8rem)] overflow-x-hidden overflow-y-auto pr-1">
           {formError ? (
             <div className="rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">
               {formError}
@@ -955,7 +955,7 @@ export function UsersPage() {
 
           {editingUserId ? (
             <div className="mt-4 space-y-4">
-              <form className="panel-subtle space-y-4 p-5" onSubmit={(event) => void submitUser(event)}>
+              <form className="panel-subtle space-y-4 p-4 sm:p-5" onSubmit={(event) => void submitUser(event)}>
                 <div>
                   <p className="metric-kicker">Update User</p>
                   <p className="mt-2 text-sm text-slate-400">Edit identity details and sync state for this account.</p>
@@ -1002,7 +1002,7 @@ export function UsersPage() {
                 </div>
               </form>
 
-              <form className="panel-subtle space-y-4 p-5" onSubmit={(event) => void submitAllocation(event)}>
+              <form className="panel-subtle space-y-4 p-4 sm:p-5" onSubmit={(event) => void submitAllocation(event)}>
                 <div>
                   <p className="metric-kicker">Add Bandwidth</p>
                   <p className="mt-2 text-sm text-slate-400">Create a new bandwidth package without leaving this edit modal.</p>
@@ -1057,7 +1057,7 @@ export function UsersPage() {
                 </div>
               </form>
 
-              <div className="panel-subtle p-5">
+              <div className="panel-subtle p-4 sm:p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="metric-kicker">Bandwidth History</p>
@@ -1416,7 +1416,7 @@ export function UsersPage() {
         onCancel={closeAccessDialog}
         onConfirm={() => undefined}
       >
-        <div className="max-h-[calc(90vh-8rem)] overflow-y-auto pr-1">
+        <div className="max-h-[calc(90vh-8rem)] overflow-x-hidden overflow-y-auto pr-1">
           {accessLoading ? (
             <div className="space-y-4">
               <div className="panel-subtle p-5">
@@ -1454,10 +1454,10 @@ export function UsersPage() {
             <div className="space-y-4">
               <div className="grid gap-4 xl:grid-cols-[320px,minmax(0,1fr)]">
                 <div className="space-y-4">
-                  <div className="panel-subtle p-5">
+                  <div className="panel-subtle p-4 sm:p-5">
                     <p className="metric-kicker">User</p>
                     <p className="mt-3 text-sm font-semibold text-white">{selectedUser?.email ?? "Unknown user"}</p>
-                    <p className="mt-3 font-mono text-xs text-slate-500">{selectedUser?.uuid ?? selectedAccess.uuid}</p>
+                    <p className="mt-3 break-all font-mono text-xs text-slate-500">{selectedUser?.uuid ?? selectedAccess.uuid}</p>
                     <div className="mt-5">
                       <BandwidthUsage
                         usedBytes={selectedUser?.bandwidthUsedBytes ?? 0}
@@ -1467,7 +1467,7 @@ export function UsersPage() {
                     </div>
                   </div>
 
-                  <div className="panel-subtle p-5">
+                  <div className="panel-subtle p-4 sm:p-5">
                     <div className="flex items-start justify-center">
                       {qrCodeUrl ? (
                         <img
@@ -1489,23 +1489,23 @@ export function UsersPage() {
                     const hasValue = Boolean(card.value);
 
                     return (
-                      <div key={card.key} className="panel-subtle p-5">
+                      <div key={card.key} className="panel-subtle p-4 sm:p-5">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
                             <p className="metric-kicker">{card.label}</p>
                           </div>
-                          <div className="flex flex-wrap gap-2">
+                          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
                             <button
                               type="button"
                               disabled={!hasValue}
                               onClick={() => void copyText(card.value, card.key)}
-                              className="btn-primary gap-2 px-3 py-2 text-xs disabled:bg-slate-500"
+                              className="btn-primary w-full justify-center gap-2 px-3 py-2 text-xs disabled:bg-slate-500 sm:w-auto"
                             >
                               <Copy className="h-3.5 w-3.5" />
                               {copiedKey === card.key ? "Copied" : card.copyLabel}
                             </button>
                             {card.openLabel && hasValue ? (
-                              <a href={card.value} className="btn-secondary px-3 py-2 text-xs">
+                              <a href={card.value} className="btn-secondary w-full px-3 py-2 text-center text-xs sm:w-auto">
                                 <Link2 className="mr-2 inline h-3.5 w-3.5" />
                                 {card.openLabel}
                               </a>
@@ -1519,7 +1519,7 @@ export function UsersPage() {
                     );
                   })}
 
-                  <div className="panel-subtle p-5">
+                  <div className="panel-subtle p-4 sm:p-5">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <p className="metric-kicker">Node Usage Share</p>
@@ -1586,7 +1586,7 @@ export function UsersPage() {
                     )}
                   </div>
 
-                  <div className="panel-subtle p-5">
+                  <div className="panel-subtle p-4 sm:p-5">
                     <div className="flex items-center gap-2">
                       <QrCode className="h-4 w-4 text-sky-300" />
                       <p className="metric-kicker">Node URLs</p>
@@ -1600,7 +1600,7 @@ export function UsersPage() {
                           <p className="mt-2 break-all font-mono text-xs leading-6 text-slate-300">{link.url}</p>
                           <button
                             onClick={() => void copyText(link.url, `${link.nodeName}-${link.protocol}`)}
-                            className="btn-primary mt-3 gap-2 px-3 py-2 text-xs"
+                            className="btn-primary mt-3 w-full justify-center gap-2 px-3 py-2 text-xs sm:w-auto"
                           >
                             <Copy className="h-3.5 w-3.5" />
                             {copiedKey === `${link.nodeName}-${link.protocol}` ? "Copied" : `Copy ${link.protocol} URL`}
