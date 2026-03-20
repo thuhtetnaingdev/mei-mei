@@ -4,6 +4,8 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"panel_backend/internal/auth"
 	"panel_backend/internal/config"
 	"panel_backend/internal/models"
@@ -116,7 +118,53 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 		protected.DELETE("/mint-pool", handler.resetMintPool)
 	}
 
+	registerFrontendRoutes(router, cfg)
+
 	return router
+}
+
+func registerFrontendRoutes(router *gin.Engine, cfg config.Config) {
+	if cfg.FrontendDistDir == "" {
+		return
+	}
+
+	indexPath := filepath.Join(cfg.FrontendDistDir, "index.html")
+	if _, err := os.Stat(indexPath); err != nil {
+		log.Printf("frontend dist not found at %s: %v", indexPath, err)
+		return
+	}
+
+	serveIndex := func(c *gin.Context) {
+		c.File(indexPath)
+	}
+
+	assetsDir := filepath.Join(cfg.FrontendDistDir, "assets")
+	if _, err := os.Stat(assetsDir); err == nil {
+		router.StaticFS("/assets", http.Dir(assetsDir))
+	}
+
+	for _, name := range []string{"favicon.ico", "manifest.webmanifest", "robots.txt"} {
+		filePath := filepath.Join(cfg.FrontendDistDir, name)
+		if _, err := os.Stat(filePath); err == nil {
+			router.StaticFile("/"+name, filePath)
+		}
+	}
+
+	router.GET("/", serveIndex)
+	router.NoRoute(func(c *gin.Context) {
+		if c.Request.Method != http.MethodGet {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+
+		path := c.Request.URL.Path
+		if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/auth/") || strings.HasPrefix(path, "/subscription/") || strings.HasPrefix(path, "/profiles/") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+
+		serveIndex(c)
+	})
 }
 
 func (h *Handler) getMintPool(c *gin.Context) {

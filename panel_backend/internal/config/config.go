@@ -19,6 +19,7 @@ type Config struct {
 	BaseSubscriptionURL string
 	BasePublicURL       string
 	AllowedOrigins      []string
+	FrontendDistDir     string
 	NodeSharedToken     string
 	SyncTimeoutSeconds  int
 }
@@ -35,6 +36,7 @@ func Load() Config {
 		AdminPassword:       getEnv("ADMIN_PASSWORD", "admin"),
 		BaseSubscriptionURL: getEnv("BASE_SUBSCRIPTION_URL", "http://localhost:8080/subscription"),
 		AllowedOrigins:      getEnvAsSlice("ALLOWED_ORIGINS", []string{"http://localhost:5173", "http://127.0.0.1:5173"}),
+		FrontendDistDir:     getEnv("FRONTEND_DIST_DIR", ""),
 		NodeSharedToken:     mustEnv("NODE_SHARED_TOKEN"),
 		SyncTimeoutSeconds:  getEnvAsInt("SYNC_TIMEOUT_SECONDS", 10),
 	}
