@@ -1593,17 +1593,17 @@ export function UsersPage() {
                     </div>
                     <div className="mt-4 space-y-3">
                       {selectedAccess.nodeLinks?.length ? selectedAccess.nodeLinks.map((link) => (
-                        <div key={`${link.nodeName}-${link.protocol}`} className="rounded-2xl border border-white/10 bg-slate-950/35 p-4">
+                        <div key={link.url} className="rounded-2xl border border-white/10 bg-slate-950/35 p-4">
                           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                             {link.nodeName} / {link.protocol}
                           </p>
                           <p className="mt-2 break-all font-mono text-xs leading-6 text-slate-300">{link.url}</p>
                           <button
-                            onClick={() => void copyText(link.url, `${link.nodeName}-${link.protocol}`)}
+                            onClick={() => void copyText(link.url, link.url)}
                             className="btn-primary mt-3 w-full justify-center gap-2 px-3 py-2 text-xs sm:w-auto"
                           >
                             <Copy className="h-3.5 w-3.5" />
-                            {copiedKey === `${link.nodeName}-${link.protocol}` ? "Copied" : `Copy ${link.protocol} URL`}
+                            {copiedKey === link.url ? "Copied" : `Copy ${link.protocol} URL`}
                           </button>
                         </div>
                       )) : (
