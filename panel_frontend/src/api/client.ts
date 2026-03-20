@@ -1,4 +1,9 @@
 import axios from "axios";
+import type { InternalAxiosRequestConfig } from "axios";
+
+type CompatAxiosRequestConfig = InternalAxiosRequestConfig & {
+  _legacyRetryWithoutApiPrefix?: boolean;
+};
 
 const browserBaseUrl =
   typeof window !== "undefined" ? window.location.origin : "http://localhost:8080";
@@ -33,5 +38,30 @@ api.interceptors.request.use((config) => {
   }
   return config;
 });
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (!axios.isAxiosError(error) || !error.config) {
+      return Promise.reject(error);
+    }
+
+    const config = error.config as CompatAxiosRequestConfig;
+    const requestUrl = config.url ?? "";
+    const shouldRetryLegacyRoute =
+      error.response?.status === 404 &&
+      !config._legacyRetryWithoutApiPrefix &&
+      requestUrl.startsWith("/api/") &&
+      !/^https?:\/\//i.test(requestUrl);
+
+    if (!shouldRetryLegacyRoute) {
+      return Promise.reject(error);
+    }
+
+    config._legacyRetryWithoutApiPrefix = true;
+    config.url = requestUrl.replace(/^\/api/, "");
+    return api.request(config);
+  }
+);
 
 export default api;
