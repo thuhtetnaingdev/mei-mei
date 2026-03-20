@@ -25,11 +25,11 @@ func isNodeBandwidthExceeded(node models.Node) bool {
 	return node.BandwidthUsedBytes >= limitBytes
 }
 
-// filterAvailableNodes returns only nodes that have not exceeded their bandwidth limit
+// filterAvailableNodes returns only nodes that are enabled and have not exceeded their bandwidth limit
 func filterAvailableNodes(nodes []models.Node) []models.Node {
 	available := make([]models.Node, 0, len(nodes))
 	for _, node := range nodes {
-		if !isNodeBandwidthExceeded(node) {
+		if node.Enabled && !isNodeBandwidthExceeded(node) {
 			available = append(available, node)
 		}
 	}

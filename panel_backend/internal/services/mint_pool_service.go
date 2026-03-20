@@ -36,12 +36,12 @@ func (s *MintPoolService) GetSnapshot() (*MintPoolSnapshot, error) {
 		return nil, err
 	}
 
-	var history []models.MintPoolEvent
+	history := make([]models.MintPoolEvent, 0)
 	if err := s.db.Order("created_at desc").Limit(25).Find(&history).Error; err != nil {
 		return nil, err
 	}
 
-	var transfers []models.MintPoolTransferEvent
+	transfers := make([]models.MintPoolTransferEvent, 0)
 	if err := s.db.Order("updated_at desc, created_at desc").Limit(25).Find(&transfers).Error; err != nil {
 		return nil, err
 	}

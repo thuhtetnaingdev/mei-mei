@@ -24,6 +24,14 @@ const defaultSnapshot: MintPoolSnapshot = {
   transfers: []
 };
 
+function normalizeSnapshot(snapshot?: Partial<MintPoolSnapshot> | null): MintPoolSnapshot {
+  return {
+    pool: snapshot?.pool ?? defaultSnapshot.pool,
+    history: Array.isArray(snapshot?.history) ? snapshot.history : [],
+    transfers: Array.isArray(snapshot?.transfers) ? snapshot.transfers : []
+  };
+}
+
 const formatNumber = (value: number) => new Intl.NumberFormat().format(value);
 const formatTokenAmount = (value: number) =>
   new Intl.NumberFormat(undefined, {
@@ -61,7 +69,7 @@ export function MintPoolPage() {
 
   const loadSnapshot = async () => {
     const response = await api.get<MintPoolSnapshot>("/mint-pool");
-    setSnapshot(response.data);
+    setSnapshot(normalizeSnapshot(response.data));
   };
 
   useEffect(() => {
@@ -81,7 +89,7 @@ export function MintPoolPage() {
         note,
         approved: true
       });
-      setSnapshot(response.data);
+      setSnapshot(normalizeSnapshot(response.data));
       setStatus(`Minted ${formatNumber(parsedAmount)} Mei from ${formatNumber(parsedAmount)} MMK at a fixed 1:1 rate.`);
       setNote("");
       setApprovalDialogOpen(false);

@@ -20,6 +20,7 @@ func NewRouter(cfg config.Config) *gin.Engine {
 func NewRouterWithConfigService(cfg config.Config, configService *services.ConfigService) *gin.Engine {
 	router := gin.Default()
 	reinstallService := services.NewReinstallService(cfg.NodeBinaryPath, cfg.NodeRestartCommand)
+	uninstallService := services.NewUninstallService(cfg)
 
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -117,6 +118,17 @@ func NewRouterWithConfigService(cfg config.Config, configService *services.Confi
 
 			log.Printf("[reinstall] Result: success=%v, message=%s", result.Success, result.Message)
 			c.JSON(status, result)
+		})
+
+		protected.POST("/uninstall", func(c *gin.Context) {
+			result, err := uninstallService.Schedule()
+			if err != nil {
+				log.Printf("[uninstall] schedule error: %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+
+			c.JSON(http.StatusAccepted, result)
 		})
 	}
 

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Globe, Plus, RefreshCw, ServerCog, ShieldCheck, Trash2, Wrench } from "lucide-react";
+import { Globe, PauseCircle, PlayCircle, Plus, RefreshCw, ServerCog, ShieldCheck, Trash2, Wrench } from "lucide-react";
 import api from "../api/client";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { SectionCard } from "../components/SectionCard";
@@ -29,6 +29,21 @@ const emptyBootstrapForm = {
   singboxReloadCommand: "systemctl restart meimei-sing-box.service"
 };
 
+function getRequestErrorMessage(error: unknown, fallback: string) {
+  if (typeof error === "object" && error !== null) {
+    const response = (error as { response?: { data?: { error?: unknown } } }).response;
+    if (typeof response?.data?.error === "string" && response.data.error.trim()) {
+      return response.data.error;
+    }
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
 export function NodesPage() {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [bootstrapLog, setBootstrapLog] = useState<string[]>([]);
@@ -37,8 +52,10 @@ export function NodesPage() {
   const [createNodeDialogOpen, setCreateNodeDialogOpen] = useState(false);
   const [nodeActionStatus, setNodeActionStatus] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Node | null>(null);
+  const [toggleTarget, setToggleTarget] = useState<Node | null>(null);
   const [reinstallTarget, setReinstallTarget] = useState<Node | null>(null);
   const [isReinstalling, setIsReinstalling] = useState(false);
+  const [isTogglingNode, setIsTogglingNode] = useState(false);
   const [editingNode, setEditingNode] = useState<Node | null>(null);
   const [nodeEditForm, setNodeEditForm] = useState({
     location: "",
@@ -165,8 +182,7 @@ export function NodesPage() {
       setDeleteTarget(null);
       await loadNodes();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Delete failed";
-      setNodeActionStatus(message);
+      setNodeActionStatus(getRequestErrorMessage(error, "Delete failed"));
     }
   };
 
@@ -184,10 +200,36 @@ export function NodesPage() {
       setReinstallTarget(null);
       await loadNodes();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Reinstall failed";
-      setNodeActionStatus(message);
+      setNodeActionStatus(getRequestErrorMessage(error, "Reinstall failed"));
     } finally {
       setIsReinstalling(false);
+    }
+  };
+
+  const toggleNodeEnabled = async () => {
+    if (!toggleTarget) {
+      return;
+    }
+
+    const nextEnabled = !toggleTarget.enabled;
+    setIsTogglingNode(true);
+    setNodeActionStatus("");
+
+    try {
+      await api.patch(`/nodes/${toggleTarget.id}`, {
+        enabled: nextEnabled
+      });
+      setNodeActionStatus(
+        nextEnabled
+          ? `Enabled node ${toggleTarget.name}. Active users were synced back to this node.`
+          : `Disabled node ${toggleTarget.name}. Active users can no longer use this node.`
+      );
+      setToggleTarget(null);
+      await loadNodes();
+    } catch (error) {
+      setNodeActionStatus(getRequestErrorMessage(error, nextEnabled ? "Enable failed" : "Disable failed"));
+    } finally {
+      setIsTogglingNode(false);
     }
   };
 
@@ -228,8 +270,23 @@ export function NodesPage() {
     return new Date(value).toLocaleString();
   };
 
+  const formatCompactDateTime = (value?: string | null) => {
+    if (!value) {
+      return "No signal yet";
+    }
+
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    }).format(new Date(value));
+  };
+
   const onlineNodes = nodes.filter((node) => node.healthStatus === "online").length;
   const offlineNodes = nodes.filter((node) => node.healthStatus === "offline").length;
+  const enabledNodes = nodes.filter((node) => node.enabled).length;
+  const disabledNodes = nodes.filter((node) => !node.enabled).length;
 
   return (
     <div className="space-y-4">
@@ -252,18 +309,26 @@ export function NodesPage() {
             </div>
           }
         >
-          <div className="grid gap-2.5 sm:grid-cols-3">
+          <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
             <div className="panel-subtle p-3">
               <p className="metric-kicker">Registered</p>
               <p className="mt-2 font-display text-2xl font-bold text-white">{nodes.length}</p>
+              <p className="mt-1 text-xs text-slate-500">All known VPS nodes</p>
             </div>
             <div className="panel-subtle p-3">
               <p className="metric-kicker">Online</p>
               <p className="mt-2 font-display text-2xl font-bold text-emerald-300">{onlineNodes}</p>
+              <p className="mt-1 text-xs text-slate-500">Responding to health checks</p>
             </div>
             <div className="panel-subtle p-3">
-              <p className="metric-kicker">Offline</p>
-              <p className="mt-2 font-display text-2xl font-bold text-rose-300">{offlineNodes}</p>
+              <p className="metric-kicker">Traffic Live</p>
+              <p className="mt-2 font-display text-2xl font-bold text-sky-300">{enabledNodes}</p>
+              <p className="mt-1 text-xs text-slate-500">Included in user access</p>
+            </div>
+            <div className="panel-subtle p-3">
+              <p className="metric-kicker">Attention</p>
+              <p className="mt-2 font-display text-2xl font-bold text-amber-200">{offlineNodes + disabledNodes}</p>
+              <p className="mt-1 text-xs text-slate-500">Offline or intentionally paused</p>
             </div>
           </div>
         </SectionCard>
@@ -317,86 +382,118 @@ export function NodesPage() {
         </SectionCard>
       ) : null}
 
-      <SectionCard eyebrow="Node Inventory" title="Registered nodes" description="Every node card is compact enough for mobile but still keeps operational actions one tap away.">
+      <SectionCard eyebrow="Node Inventory" title="Registered nodes" description="Compact rows designed for larger fleets, with the controls and node facts kept close together.">
         <div className="space-y-4">
-          {nodeActionStatus ? <p className="text-sm text-slate-400">{nodeActionStatus}</p> : null}
-          <div className="grid gap-4 xl:grid-cols-2">
-            {nodes.map((node) => (
-              <article key={node.id} className="panel-subtle p-5">
-                <div className="flex flex-col gap-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <h3 className="font-display text-xl text-white">{node.name}</h3>
-                      <p className="mt-1 text-sm text-slate-400">{node.location || "Unknown region"}</p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className={`status-pill ${
-                        node.healthStatus === "online" ? "text-emerald-300" : node.healthStatus === "offline" ? "text-rose-300" : "text-slate-400"
-                      }`}>
-                        <span className={`h-2 w-2 rounded-full ${
-                          node.healthStatus === "online" ? "bg-emerald-400" : node.healthStatus === "offline" ? "bg-rose-400" : "bg-slate-500"
-                        }`} />
-                        {node.healthStatus}
-                      </span>
-                      <button onClick={() => openEditNode(node)} className="btn-secondary px-3 py-2 text-xs">
-                        Edit
-                      </button>
-                      <button onClick={() => setReinstallTarget(node)} disabled={isReinstalling} className="btn-primary px-3 py-2 text-xs">
-                        Reinstall
-                      </button>
-                      <button
-                        onClick={() => setDeleteTarget(node)}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-rose-400/20 bg-rose-500/10 text-rose-200 transition hover:bg-rose-500/20"
-                        title="Delete node"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
+          {nodeActionStatus ? (
+            <div className="rounded-2xl border border-sky-400/15 bg-sky-400/10 px-4 py-3 text-sm text-sky-100">
+              {nodeActionStatus}
+            </div>
+          ) : null}
 
-                  <div className="grid gap-3 text-sm sm:grid-cols-2">
-                    <div className="rounded-2xl border border-white/10 bg-slate-950/30 p-4">
-                      <p className="metric-kicker">Base URL</p>
-                      <p className="mt-2 break-all text-slate-200">{node.baseUrl}</p>
-                    </div>
-                    <div className="rounded-2xl border border-white/10 bg-slate-950/30 p-4">
-                      <p className="metric-kicker">Public Host</p>
-                      <p className="mt-2 break-all text-slate-200">{node.publicHost || "Not set"}</p>
-                    </div>
-                  </div>
+          {nodes.length === 0 ? (
+            <div className="rounded-[24px] border border-dashed border-white/12 bg-white/[0.02] px-5 py-6">
+              <p className="metric-kicker">Fleet Offline</p>
+              <h3 className="mt-3 font-display text-2xl font-semibold text-white">No nodes registered yet</h3>
+              <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-400">
+                Add a VPS node to start syncing users and generating routes.
+              </p>
+              <button type="button" onClick={() => setCreateNodeDialogOpen(true)} className="btn-primary mt-5 gap-1.5">
+                <Plus className="h-4 w-4" />
+                Create first node
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {nodes.map((node) => {
+                return (
+                  <article
+                    key={node.id}
+                    className={`rounded-[24px] border px-4 py-4 sm:px-5 ${
+                      node.enabled ? "border-white/10 bg-white/[0.04] shadow-panel" : "border-amber-400/16 bg-amber-300/[0.05] shadow-panel"
+                    }`}
+                  >
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-display text-xl font-semibold text-white">{node.name}</h3>
+                            <span className={`status-pill ${
+                              node.healthStatus === "online" ? "text-emerald-300" : node.healthStatus === "offline" ? "text-rose-300" : "text-slate-400"
+                            }`}>
+                              <span className={`h-2 w-2 rounded-full ${
+                                node.healthStatus === "online" ? "bg-emerald-400" : node.healthStatus === "offline" ? "bg-rose-400" : "bg-slate-500"
+                              }`} />
+                              {node.healthStatus}
+                            </span>
+                            <span className={`status-pill ${node.enabled ? "text-sky-300" : "text-amber-200"}`}>
+                              <span className={`h-2 w-2 rounded-full ${node.enabled ? "bg-sky-400" : "bg-amber-300"}`} />
+                              {node.enabled ? "enabled" : "disabled"}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-sm text-slate-400">
+                            {node.location || "Unknown region"} • {node.publicHost || "No public host"}
+                          </p>
+                        </div>
 
-                  <dl className="grid gap-3 text-sm text-slate-300 sm:grid-cols-2">
-                    <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
-                      <dt className="metric-kicker">VLESS</dt>
-                      <dd className="mt-2 text-white">{node.vlessPort}</dd>
+                        <div className="flex flex-wrap gap-2">
+                          <button onClick={() => openEditNode(node)} className="btn-secondary px-3 py-2 text-xs">
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => setToggleTarget(node)}
+                            disabled={isTogglingNode}
+                            className={`${node.enabled ? "btn-secondary" : "btn-primary"} gap-1 px-3 py-2 text-xs`}
+                          >
+                            {node.enabled ? <PauseCircle className="h-3.5 w-3.5" /> : <PlayCircle className="h-3.5 w-3.5" />}
+                            {node.enabled ? "Disable" : "Enable"}
+                          </button>
+                          <button onClick={() => setReinstallTarget(node)} disabled={isReinstalling} className="btn-secondary gap-1 px-3 py-2 text-xs">
+                            <RefreshCw className="h-3.5 w-3.5" />
+                            Reinstall
+                          </button>
+                          <button
+                            onClick={() => setDeleteTarget(node)}
+                            className="inline-flex items-center justify-center gap-1 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-100 transition hover:bg-rose-500/20"
+                            title="Delete node"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+
+                      <dl className="grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-6">
+                        <div className="rounded-[20px] border border-white/10 bg-slate-950/28 px-3 py-3">
+                          <dt className="metric-kicker">API</dt>
+                          <dd className="mt-2 break-all text-slate-200">{node.baseUrl}</dd>
+                        </div>
+                        <div className="rounded-[20px] border border-white/10 bg-slate-950/28 px-3 py-3">
+                          <dt className="metric-kicker">Ports</dt>
+                          <dd className="mt-2 text-slate-200">V {node.vlessPort} · T {node.tuicPort} · H {node.hysteria2Port}</dd>
+                        </div>
+                        <div className="rounded-[20px] border border-white/10 bg-slate-950/28 px-3 py-3">
+                          <dt className="metric-kicker">Usage</dt>
+                          <dd className="mt-2 text-slate-200">{formatBytes(node.bandwidthUsedBytes)}</dd>
+                        </div>
+                        <div className="rounded-[20px] border border-white/10 bg-slate-950/28 px-3 py-3">
+                          <dt className="metric-kicker">Limit</dt>
+                          <dd className="mt-2 text-slate-200">{node.bandwidthLimitGb > 0 ? `${node.bandwidthLimitGb} GB` : "Unlimited"}</dd>
+                        </div>
+                        <div className="rounded-[20px] border border-white/10 bg-slate-950/28 px-3 py-3">
+                          <dt className="metric-kicker">Last Sync</dt>
+                          <dd className="mt-2 text-slate-200">{formatCompactDateTime(node.lastSyncAt)}</dd>
+                        </div>
+                        <div className="rounded-[20px] border border-white/10 bg-slate-950/28 px-3 py-3">
+                          <dt className="metric-kicker">Expires</dt>
+                          <dd className="mt-2 text-slate-200">{formatDateTime(node.expiresAt)}</dd>
+                        </div>
+                      </dl>
                     </div>
-                    <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
-                      <dt className="metric-kicker">TUIC</dt>
-                      <dd className="mt-2 text-white">{node.tuicPort}</dd>
-                    </div>
-                    <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
-                      <dt className="metric-kicker">Hysteria2</dt>
-                      <dd className="mt-2 text-white">{node.hysteria2Port}</dd>
-                    </div>
-                    <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
-                      <dt className="metric-kicker">Bandwidth</dt>
-                      <dd className="mt-2 text-white">
-                        {node.bandwidthLimitGb > 0 ? `${node.bandwidthLimitGb} GB cap` : "Unlimited"}
-                      </dd>
-                    </div>
-                    <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
-                      <dt className="metric-kicker">Usage</dt>
-                      <dd className="mt-2 text-white">{formatBytes(node.bandwidthUsedBytes)}</dd>
-                    </div>
-                    <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
-                      <dt className="metric-kicker">Expires</dt>
-                      <dd className="mt-2 text-white">{formatDateTime(node.expiresAt)}</dd>
-                    </div>
-                  </dl>
-                </div>
-              </article>
-            ))}
-          </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </div>
       </SectionCard>
 
@@ -492,9 +589,33 @@ export function NodesPage() {
       </ConfirmDialog>
 
       <ConfirmDialog
+        open={Boolean(toggleTarget)}
+        title={toggleTarget?.enabled ? "Disable node?" : "Enable node?"}
+        description={
+          toggleTarget
+            ? toggleTarget.enabled
+              ? `This will disable ${toggleTarget.name}, remove active users from that node, and keep it out of subscriptions and sing-box profiles.`
+              : `This will enable ${toggleTarget.name}, sync active users back to it, and include it in subscriptions again.`
+            : ""
+        }
+        confirmLabel={
+          isTogglingNode
+            ? toggleTarget?.enabled
+              ? "Disabling..."
+              : "Enabling..."
+            : toggleTarget?.enabled
+              ? "Disable Node"
+              : "Enable Node"
+        }
+        tone={toggleTarget?.enabled ? "danger" : "neutral"}
+        onCancel={() => setToggleTarget(null)}
+        onConfirm={() => void toggleNodeEnabled()}
+      />
+
+      <ConfirmDialog
         open={Boolean(deleteTarget)}
         title="Delete node?"
-        description={deleteTarget ? `This will remove ${deleteTarget.name} from the panel metadata. It will not uninstall software from the VPS.` : ""}
+        description={deleteTarget ? `This will remove ${deleteTarget.name} from the panel and uninstall its Meimei services and files from the VPS. If the VPS is unreachable, deletion will be blocked.` : ""}
         confirmLabel="Delete Node"
         tone="danger"
         onCancel={() => setDeleteTarget(null)}

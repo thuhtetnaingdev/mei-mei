@@ -6,7 +6,7 @@ import api from "../api/client";
 import { BandwidthUsage } from "../components/BandwidthUsage";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { SectionCard } from "../components/SectionCard";
-import type { MintPoolSnapshot, User, UserBandwidthAllocation } from "../types";
+import type { MintPoolSnapshot, Node, User, UserBandwidthAllocation } from "../types";
 
 interface SubscriptionResponse {
   userId: number;
@@ -21,6 +21,22 @@ interface SubscriptionResponse {
     url: string;
   }>;
 }
+
+type UserAccessNodeUsageRow = {
+  key: string;
+  nodeId?: number;
+  nodeName: string;
+  publicHost: string;
+  protocols: string[];
+  bandwidthBytes: number;
+  percentage: number;
+  hasCurrentAccess: boolean;
+};
+
+type NodeUsageRingProps = {
+  percentage: number;
+  emphasis: "active" | "history" | "idle";
+};
 
 type UserFormState = {
   email: string;
@@ -86,6 +102,7 @@ const formatTokenAmount = (value: number) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(value);
+const formatPercentage = (value: number) => `${value >= 10 || Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}%`;
 
 const toDateTimeLocalValue = (value?: string | null) => {
   if (!value) {
@@ -170,6 +187,101 @@ const extractApiError = (error: unknown, fallback: string) => {
   return fallback;
 };
 
+const buildUserAccessNodeUsage = (
+  user: User | null,
+  access: SubscriptionResponse | null,
+  nodes: Node[]
+): { rows: UserAccessNodeUsageRow[]; totalUsageBytes: number } => {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const nodeByName = new Map(nodes.map((node) => [node.name, node]));
+  const usageBytesByNodeId = new Map<number, number>();
+
+  (user?.bandwidthAllocations ?? []).forEach((allocation) => {
+    (allocation.nodeUsages ?? []).forEach((nodeUsage) => {
+      usageBytesByNodeId.set(
+        nodeUsage.nodeId,
+        (usageBytesByNodeId.get(nodeUsage.nodeId) ?? 0) + (nodeUsage.bandwidthBytes ?? 0)
+      );
+    });
+  });
+
+  const totalUsageBytes = Array.from(usageBytesByNodeId.values()).reduce((sum, value) => sum + value, 0);
+  const rows = new Map<string, UserAccessNodeUsageRow>();
+
+  (access?.nodeLinks ?? []).forEach((link) => {
+    const matchedNode = nodeByName.get(link.nodeName);
+    const key = matchedNode ? `node:${matchedNode.id}` : `access:${link.nodeName}`;
+    const existing = rows.get(key);
+
+    if (existing) {
+      const normalizedProtocol = link.protocol.toUpperCase();
+      if (!existing.protocols.includes(normalizedProtocol)) {
+        existing.protocols.push(normalizedProtocol);
+      }
+      return;
+    }
+
+    rows.set(key, {
+      key,
+      nodeId: matchedNode?.id,
+      nodeName: matchedNode?.name ?? link.nodeName,
+      publicHost: matchedNode?.publicHost ?? "",
+      protocols: [link.protocol.toUpperCase()],
+      bandwidthBytes: 0,
+      percentage: 0,
+      hasCurrentAccess: true
+    });
+  });
+
+  usageBytesByNodeId.forEach((bandwidthBytes, nodeId) => {
+    const key = `node:${nodeId}`;
+    const matchedNode = nodeById.get(nodeId);
+    const existing = rows.get(key);
+
+    if (existing) {
+      existing.bandwidthBytes = bandwidthBytes;
+      if (!existing.publicHost && matchedNode?.publicHost) {
+        existing.publicHost = matchedNode.publicHost;
+      }
+      if ((!existing.nodeName || existing.nodeName.startsWith("Node #")) && matchedNode?.name) {
+        existing.nodeName = matchedNode.name;
+      }
+      return;
+    }
+
+    rows.set(key, {
+      key,
+      nodeId,
+      nodeName: matchedNode?.name ?? `Node #${nodeId}`,
+      publicHost: matchedNode?.publicHost ?? "",
+      protocols: [],
+      bandwidthBytes,
+      percentage: 0,
+      hasCurrentAccess: false
+    });
+  });
+
+  const sortedRows = Array.from(rows.values())
+    .map((row) => ({
+      ...row,
+      percentage: totalUsageBytes > 0 ? (row.bandwidthBytes / totalUsageBytes) * 100 : 0
+    }))
+    .sort((left, right) => {
+      if (right.bandwidthBytes !== left.bandwidthBytes) {
+        return right.bandwidthBytes - left.bandwidthBytes;
+      }
+      if (left.hasCurrentAccess !== right.hasCurrentAccess) {
+        return Number(right.hasCurrentAccess) - Number(left.hasCurrentAccess);
+      }
+      return left.nodeName.localeCompare(right.nodeName);
+    });
+
+  return {
+    rows: sortedRows,
+    totalUsageBytes
+  };
+};
+
 function AllocationSummary({ allocation }: { allocation: UserBandwidthAllocation }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-3">
@@ -183,8 +295,41 @@ function AllocationSummary({ allocation }: { allocation: UserBandwidthAllocation
   );
 }
 
+function NodeUsageRing({ percentage, emphasis }: NodeUsageRingProps) {
+  const clampedPercentage = Math.max(0, Math.min(percentage, 100));
+  const radius = 22;
+  const circumference = 2 * Math.PI * radius;
+  const dashOffset = circumference * (1 - clampedPercentage / 100);
+  const strokeClass =
+    emphasis === "history" ? "stroke-amber-300" : emphasis === "idle" ? "stroke-slate-500" : "stroke-sky-300";
+  const textClass =
+    emphasis === "history" ? "text-amber-200" : emphasis === "idle" ? "text-slate-300" : "text-sky-300";
+
+  return (
+    <div className="relative h-16 w-16 shrink-0">
+      <svg viewBox="0 0 56 56" className="h-16 w-16 -rotate-90">
+        <circle cx="28" cy="28" r={radius} className="fill-none stroke-white/10" strokeWidth="5" />
+        <circle
+          cx="28"
+          cy="28"
+          r={radius}
+          className={`fill-none ${strokeClass}`}
+          strokeWidth="5"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={dashOffset}
+        />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className={`text-xs font-semibold ${textClass}`}>{Math.round(clampedPercentage)}%</span>
+      </div>
+    </div>
+  );
+}
+
 export function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
+  const [nodes, setNodes] = useState<Node[]>([]);
   const [form, setForm] = useState<UserFormState>(defaultFormState);
   const [allocationForm, setAllocationForm] = useState<AllocationFormState>(defaultAllocationForm);
   const [editingUserId, setEditingUserId] = useState<number | null>(null);
@@ -210,12 +355,13 @@ export function UsersPage() {
   const [mainWalletBalance, setMainWalletBalance] = useState<number | null>(null);
 
   const loadUsers = () => api.get<User[]>("/users").then((res) => setUsers(res.data));
+  const loadNodes = () => api.get<Node[]>("/nodes").then((res) => setNodes(res.data));
   const loadTreasury = () =>
     api.get<MintPoolSnapshot>("/mint-pool").then((res) => setMainWalletBalance(res.data.pool.mainWalletBalance));
   const syncNodes = () => api.post("/nodes/sync").catch(() => undefined);
 
   useEffect(() => {
-    void Promise.all([loadUsers(), loadTreasury()]).catch(() => undefined);
+    void Promise.all([loadUsers(), loadTreasury(), loadNodes().catch(() => undefined)]).catch(() => undefined);
   }, []);
 
   const closeUserDialog = () => {
@@ -528,6 +674,7 @@ export function UsersPage() {
       ]
     : [];
   const selectedUserSummary = selectedUser ? deriveUserSummary(selectedUser) : null;
+  const selectedNodeUsage = buildUserAccessNodeUsage(selectedUser, selectedAccess, nodes);
   const editingUser = editingUserId ? users.find((user) => user.id === editingUserId) ?? null : null;
   const bandwidthHistoryEntries = [...(editingUser?.bandwidthAllocations ?? [])].sort(
     (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
@@ -1371,6 +1518,73 @@ export function UsersPage() {
                       </div>
                     );
                   })}
+
+                  <div className="panel-subtle p-5">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="metric-kicker">Node Usage Share</p>
+                        <p className="mt-2 text-sm text-slate-400">Percentage of this user&apos;s recorded traffic on each node.</p>
+                      </div>
+                      <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-slate-300">
+                        {selectedNodeUsage.totalUsageBytes > 0
+                          ? `${formatBandwidthBytes(selectedNodeUsage.totalUsageBytes)} tracked`
+                          : `${selectedNodeUsage.rows.length} nodes`}
+                      </div>
+                    </div>
+
+                    {selectedNodeUsage.rows.length ? (
+                      <div className="mt-4 space-y-3">
+                        {selectedNodeUsage.totalUsageBytes <= 0 ? (
+                          <div className="rounded-2xl border border-dashed border-white/10 px-4 py-3 text-sm text-slate-500">
+                            No node traffic has been recorded for this user yet. The tiles below will fill in after the first usage report.
+                          </div>
+                        ) : null}
+
+                        <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
+                          {selectedNodeUsage.rows.map((row) => {
+                            const metaParts = [row.publicHost, row.protocols.length ? row.protocols.join(" / ") : ""].filter(Boolean);
+                            const emphasis: NodeUsageRingProps["emphasis"] =
+                              row.bandwidthBytes <= 0 ? "idle" : row.hasCurrentAccess ? "active" : "history";
+
+                            return (
+                              <div key={row.key} className="rounded-2xl border border-white/10 bg-slate-950/35 p-4">
+                                <div className="flex items-start gap-3">
+                                  <NodeUsageRing percentage={row.percentage} emphasis={emphasis} />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <p className="truncate text-sm font-semibold text-white">{row.nodeName}</p>
+                                      {!row.hasCurrentAccess ? (
+                                        <span className="rounded-full border border-amber-400/20 bg-amber-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200">
+                                          History
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    <p className="mt-1 text-xs text-slate-500">{metaParts.join(" · ") || "Usage recorded for this node."}</p>
+                                    <div className="mt-3 flex items-end justify-between gap-3">
+                                      <div>
+                                        <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Traffic</p>
+                                        <p className="mt-1 text-sm font-semibold text-white">{formatBandwidthBytes(row.bandwidthBytes)}</p>
+                                      </div>
+                                      <div className="text-right">
+                                        <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Share</p>
+                                        <p className={`mt-1 text-sm font-semibold ${emphasis === "history" ? "text-amber-200" : emphasis === "idle" ? "text-slate-300" : "text-sky-300"}`}>
+                                          {formatPercentage(row.percentage)}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-4 rounded-2xl border border-dashed border-white/10 p-4 text-sm text-slate-500">
+                        Node usage will appear here once this user starts consuming traffic.
+                      </div>
+                    )}
+                  </div>
 
                   <div className="panel-subtle p-5">
                     <div className="flex items-center gap-2">

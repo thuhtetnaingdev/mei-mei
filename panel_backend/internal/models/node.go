@@ -25,6 +25,7 @@ type Node struct {
 	RealityShortID     string     `json:"realityShortId"`
 	RealityServerName  string     `json:"realityServerName"`
 	ProtocolToken      string     `json:"-" gorm:"not null"`
+	Enabled            bool       `json:"enabled" gorm:"default:true"`
 	HealthStatus       string     `json:"healthStatus" gorm:"default:unknown"`
 	LastHeartbeat      *time.Time `json:"lastHeartbeat"`
 	LastSyncAt         *time.Time `json:"lastSyncAt"`

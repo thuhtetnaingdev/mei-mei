@@ -31,6 +31,19 @@ export interface UserBandwidthAllocation {
   settlementWarning: string;
   settledAt?: string | null;
   expiresAt?: string | null;
+  nodeUsages: UserBandwidthNodeUsage[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UserBandwidthNodeUsage {
+  id: number;
+  allocationId: number;
+  userId: number;
+  nodeId: number;
+  minerId?: number | null;
+  bandwidthBytes: number;
+  rewardedTokens: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -50,6 +63,7 @@ export interface Node {
   minerId?: number | null;
   name: string;
   baseUrl: string;
+  enabled: boolean;
   location: string;
   publicHost: string;
   vlessPort: number;

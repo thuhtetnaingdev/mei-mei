@@ -1,16 +1,17 @@
 package api
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"panel_backend/internal/auth"
 	"panel_backend/internal/config"
 	"panel_backend/internal/models"
 	"panel_backend/internal/services"
 	"panel_backend/internal/subscription"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -505,7 +506,12 @@ func (h *Handler) updateNode(c *gin.Context) {
 
 	node, err := h.nodeService.Update(c.Param("id"), input)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+			return
+		}
+
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -514,7 +520,18 @@ func (h *Handler) updateNode(c *gin.Context) {
 
 func (h *Handler) deleteNode(c *gin.Context) {
 	if err := h.nodeService.Delete(c.Param("id")); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+			return
+		}
+
+		var remoteErr *services.NodeDeleteRemoteError
+		if errors.As(err, &remoteErr) {
+			c.JSON(http.StatusBadGateway, gin.H{"error": remoteErr.Error()})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.Status(http.StatusNoContent)

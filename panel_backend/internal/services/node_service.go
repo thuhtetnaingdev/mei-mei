@@ -3,10 +3,12 @@ package services
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"panel_backend/internal/models"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +23,24 @@ type NodeService struct {
 	userService   *UserService
 	bootstrapMu   sync.RWMutex
 	bootstrapJobs map[string]*BootstrapJob
+}
+
+type NodeDeleteRemoteError struct {
+	err error
+}
+
+func (e *NodeDeleteRemoteError) Error() string {
+	if e == nil || e.err == nil {
+		return "node uninstall failed"
+	}
+	return e.err.Error()
+}
+
+func (e *NodeDeleteRemoteError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
 }
 
 type RegisterNodeInput struct {
@@ -46,6 +66,7 @@ type UpdateNodeInput struct {
 	PublicHost       *string    `json:"publicHost"`
 	ExpiresAt        *time.Time `json:"expiresAt"`
 	BandwidthLimitGB *int64     `json:"bandwidthLimitGb"`
+	Enabled          *bool      `json:"enabled"`
 }
 
 type SyncPayload struct {
@@ -198,6 +219,7 @@ func (s *NodeService) Register(input RegisterNodeInput) (*models.Node, error) {
 		RealityShortID:    input.RealityShortID,
 		RealityServerName: input.RealityServerName,
 		ProtocolToken:     input.ProtocolToken,
+		Enabled:           true,
 		HealthStatus:      "registered",
 		SingboxVersion:    input.SingboxVersion,
 	}
@@ -236,6 +258,7 @@ func (s *NodeService) Update(id string, input UpdateNodeInput) (*models.Node, er
 	if err := s.db.First(&node, "id = ?", id).Error; err != nil {
 		return nil, err
 	}
+	previousEnabled := node.Enabled
 
 	if input.Location != nil {
 		node.Location = *input.Location
@@ -246,21 +269,132 @@ func (s *NodeService) Update(id string, input UpdateNodeInput) (*models.Node, er
 	if input.BandwidthLimitGB != nil {
 		node.BandwidthLimitGB = *input.BandwidthLimitGB
 	}
+	if input.Enabled != nil {
+		node.Enabled = *input.Enabled
+	}
 	node.ExpiresAt = input.ExpiresAt
 
 	if err := s.db.Save(&node).Error; err != nil {
 		return nil, err
 	}
 
+	if input.Enabled != nil && previousEnabled != node.Enabled {
+		if err := s.syncNodeEnabledState(&node); err != nil {
+			node.Enabled = previousEnabled
+			_ = s.db.Model(&node).Update("enabled", previousEnabled).Error
+			return nil, err
+		}
+	}
+
 	return &node, nil
 }
 
 func (s *NodeService) Delete(id string) error {
+	var node models.Node
+	if err := s.db.First(&node, "id = ?", id).Error; err != nil {
+		return err
+	}
+
+	if err := s.requestNodeUninstall(node); err != nil {
+		return &NodeDeleteRemoteError{err: err}
+	}
+
 	result := s.db.Delete(&models.Node{}, "id = ?", id)
 	if result.RowsAffected == 0 {
 		return gorm.ErrRecordNotFound
 	}
 	return result.Error
+}
+
+func (s *NodeService) requestNodeUninstall(node models.Node) error {
+	var errs []string
+
+	if node.SSHPrivateKey != "" && node.SSHUsername != "" {
+		if err := s.requestNodeUninstallViaSSH(node); err == nil {
+			return nil
+		} else {
+			errs = append(errs, err.Error())
+		}
+	}
+
+	if err := s.requestNodeUninstallViaAPI(node); err == nil {
+		return nil
+	} else {
+		errs = append(errs, err.Error())
+	}
+
+	if len(errs) == 0 {
+		return errors.New("node uninstall failed")
+	}
+
+	return errors.New(strings.Join(errs, "; "))
+}
+
+func (s *NodeService) requestNodeUninstallViaAPI(node models.Node) error {
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/uninstall", node.BaseURL), bytes.NewReader([]byte("{}")))
+	if err != nil {
+		return fmt.Errorf("build node uninstall request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+node.ProtocolToken)
+	req.Header.Set("X-Control-Plane-Token", s.sharedToken)
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("node uninstall request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 300 {
+		return nil
+	}
+
+	message := fmt.Sprintf("node returned status %d while scheduling uninstall", resp.StatusCode)
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr == nil && len(body) > 0 {
+		var payload struct {
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(body, &payload); err == nil && payload.Error != "" {
+			message = payload.Error
+		} else {
+			message = string(body)
+		}
+	}
+
+	return errors.New(message)
+}
+
+func (s *NodeService) requestNodeUninstallViaSSH(node models.Node) error {
+	if node.SSHPrivateKey == "" || node.SSHUsername == "" {
+		return errors.New("node uninstall endpoint is unavailable and no SSH credentials are stored for fallback cleanup")
+	}
+
+	sshHost := node.SSHHost
+	if sshHost == "" {
+		sshHost = extractSSHHost(node.BaseURL)
+	}
+	if sshHost == "" {
+		return errors.New("node uninstall endpoint is unavailable and SSH host information is missing")
+	}
+
+	sshPort := node.SSHPort
+	if sshPort == 0 {
+		sshPort = 22
+	}
+
+	client, err := s.openSSHClientWithPrivateKey(sshHost, sshPort, node.SSHUsername, node.SSHPrivateKey)
+	if err != nil {
+		return fmt.Errorf("node uninstall endpoint is unavailable and SSH fallback connect failed: %w", err)
+	}
+	defer client.Close()
+
+	if _, err := runSimpleRemoteCommand(client, buildNodeUninstallCommand(node)); err != nil {
+		return fmt.Errorf("node uninstall endpoint is unavailable and SSH fallback cleanup failed: %w", err)
+	}
+
+	return nil
 }
 
 func (s *NodeService) SyncAllUsers(users []models.User) ([]map[string]interface{}, error) {
@@ -276,7 +410,13 @@ func (s *NodeService) SyncAllUsers(users []models.User) ([]map[string]interface{
 			"status": "success",
 		}
 
-		err := s.syncNode(node, users)
+		usersToSync := users
+		if !node.Enabled {
+			usersToSync = []models.User{}
+			result["mode"] = "disabled"
+		}
+
+		err := s.syncNode(node, usersToSync)
 		if err != nil {
 			result["status"] = "failed"
 			result["error"] = err.Error()
@@ -293,6 +433,45 @@ func (s *NodeService) SyncAllUsers(users []models.User) ([]map[string]interface{
 	}
 
 	return results, nil
+}
+
+func (s *NodeService) syncNodeEnabledState(node *models.Node) error {
+	if node == nil {
+		return errors.New("node not found")
+	}
+
+	usersToSync := []models.User{}
+	if node.Enabled {
+		activeUsers, err := s.userService.ActiveUsers()
+		if err != nil {
+			return err
+		}
+		usersToSync = activeUsers
+	}
+
+	if err := s.syncNode(*node, usersToSync); err != nil {
+		return err
+	}
+
+	now := time.Now()
+	updates := map[string]interface{}{
+		"last_sync_at": &now,
+	}
+	if node.Enabled {
+		updates["health_status"] = "online"
+		updates["last_heartbeat"] = &now
+	}
+
+	if err := s.db.Model(node).Updates(updates).Error; err != nil {
+		return err
+	}
+
+	node.LastSyncAt = &now
+	if node.Enabled {
+		node.HealthStatus = "online"
+		node.LastHeartbeat = &now
+	}
+	return nil
 }
 
 func (s *NodeService) syncNode(node models.Node, users []models.User) error {

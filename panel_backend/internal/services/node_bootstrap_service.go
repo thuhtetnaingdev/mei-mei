@@ -295,6 +295,7 @@ func (s *NodeService) upsertBootstrapNodeRecord(input BootstrapNodeInput, artifa
 		RealityShortID:    artifact.realityShortID,
 		RealityServerName: artifact.realityServerName,
 		ProtocolToken:     artifact.token,
+		Enabled:           true,
 		HealthStatus:      "bootstrap_pending",
 		SingboxVersion:    "installer-managed",
 	}
@@ -323,6 +324,16 @@ func buildNodeInstallCommand(node models.Node, sharedToken string) string {
 	}
 
 	return strings.Join(append(env, "bash <(curl -fsSL "+shellQuote(scriptURL)+")"), " ")
+}
+
+func buildNodeUninstallCommand(node models.Node) string {
+	installDir := "/opt/meimei-node"
+
+	return strings.Join([]string{
+		"if command -v systemctl >/dev/null 2>&1; then systemctl disable --now meimei-node.service >/dev/null 2>&1 || true; systemctl disable --now meimei-sing-box.service >/dev/null 2>&1 || true; rm -f /etc/systemd/system/meimei-node.service /etc/systemd/system/meimei-sing-box.service; systemctl daemon-reload >/dev/null 2>&1 || true; systemctl reset-failed >/dev/null 2>&1 || true; fi",
+		fmt.Sprintf("if command -v ufw >/dev/null 2>&1; then ufw --force delete allow %d/tcp >/dev/null 2>&1 || true; ufw --force delete allow %d/tcp >/dev/null 2>&1 || true; ufw --force delete allow %d/udp >/dev/null 2>&1 || true; ufw --force delete allow %d/udp >/dev/null 2>&1 || true; fi", extractNodePort(node.BaseURL), node.VLESSPort, node.TUICPort, node.Hysteria2Port),
+		"rm -rf " + installDir,
+	}, "; ")
 }
 
 func shellQuote(value string) string {

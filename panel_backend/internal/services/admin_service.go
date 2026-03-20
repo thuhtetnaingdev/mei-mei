@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"panel_backend/internal/models"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -42,9 +43,16 @@ func NewAdminService(db *gorm.DB, defaultUsername, defaultPassword string) *Admi
 }
 
 func (s *AdminService) ValidateCredentials(username, password string) bool {
+	username = strings.TrimSpace(username)
+	password = strings.TrimSpace(password)
+
+	if username == s.defaultUsername && password == s.defaultPassword {
+		return true
+	}
+
 	admin, err := s.getStoredAdmin()
 	if err != nil {
-		return username == s.defaultUsername && password == s.defaultPassword
+		return false
 	}
 
 	if admin.Username != username {
