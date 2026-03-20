@@ -126,20 +126,32 @@ func (s *NodeService) bootstrapAndRegister(input BootstrapNodeInput, jobID strin
 	}
 	addLog("node API responded successfully at %s/status", node.BaseURL)
 
+	installedMetadata, err := readInstalledNodeMetadata(keyClient)
+	if err != nil {
+		return nil, fmt.Errorf("reading installed node metadata failed: %w", err)
+	}
+
 	now := time.Now()
 	node.HealthStatus = "online"
 	node.LastHeartbeat = &now
 	node.SingboxVersion = "installer-managed"
+	node.RealityPublicKey = installedMetadata.RealityPublicKey
+	node.RealityShortID = installedMetadata.RealityShortID
+	node.RealityServerName = installedMetadata.RealityServerName
 	if err := s.db.Model(node).Updates(map[string]interface{}{
-		"health_status":   "online",
-		"last_heartbeat":  &now,
-		"singbox_version": "installer-managed",
-		"last_sync_at":    nil,
+		"health_status":       "online",
+		"last_heartbeat":      &now,
+		"singbox_version":     "installer-managed",
+		"last_sync_at":        nil,
+		"reality_public_key":  installedMetadata.RealityPublicKey,
+		"reality_short_id":    installedMetadata.RealityShortID,
+		"reality_server_name": installedMetadata.RealityServerName,
 	}).Error; err != nil {
 		return nil, fmt.Errorf("updating node runtime status failed: %w", err)
 	}
 	addStep("registered node in control plane")
 	addLog("node %s registered with public host %s", node.Name, node.PublicHost)
+	addLog("captured live reality metadata from installed node")
 
 	users, err := s.userService.ActiveUsers()
 	if err == nil {

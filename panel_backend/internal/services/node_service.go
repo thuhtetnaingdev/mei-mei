@@ -580,6 +580,9 @@ type nodeStatusResponse struct {
 	Status             string    `json:"status"`
 	LastReload         time.Time `json:"lastReload"`
 	BandwidthUsedBytes int64     `json:"bandwidthUsedBytes"`
+	RealityPublicKey   string    `json:"realityPublicKey"`
+	RealityShortID     string    `json:"realityShortId"`
+	RealityServerName  string    `json:"realityServerName"`
 }
 
 func (s *NodeService) refreshNodeRuntimeStatus(node *models.Node) {
@@ -614,11 +617,24 @@ func (s *NodeService) refreshNodeRuntimeStatus(node *models.Node) {
 	node.HealthStatus = "online"
 	node.LastHeartbeat = &now
 	node.BandwidthUsedBytes = status.BandwidthUsedBytes
-	_ = s.db.Model(node).Updates(map[string]interface{}{
+	updates := map[string]interface{}{
 		"health_status":        "online",
 		"last_heartbeat":       &now,
 		"bandwidth_used_bytes": status.BandwidthUsedBytes,
-	}).Error
+	}
+
+	if status.RealityPublicKey != "" && status.RealityShortID != "" {
+		node.RealityPublicKey = status.RealityPublicKey
+		node.RealityShortID = status.RealityShortID
+		updates["reality_public_key"] = status.RealityPublicKey
+		updates["reality_short_id"] = status.RealityShortID
+	}
+	if status.RealityServerName != "" {
+		node.RealityServerName = status.RealityServerName
+		updates["reality_server_name"] = status.RealityServerName
+	}
+
+	_ = s.db.Model(node).Updates(updates).Error
 }
 
 func (s *NodeService) markNodeOffline(node *models.Node) {
@@ -678,11 +694,19 @@ func (s *NodeService) Reinstall(nodeID string, input ReinstallNodeInput) (*Reins
 		return nil, fmt.Errorf("node reinstall ran but node did not come back online: %w", err)
 	}
 
+	installedMetadata, err := readInstalledNodeMetadata(client)
+	if err != nil {
+		return nil, fmt.Errorf("reinstall succeeded but reading installed node metadata failed: %w", err)
+	}
+
 	now := time.Now()
 	_ = s.db.Model(&node).Updates(map[string]interface{}{
-		"health_status":   "online",
-		"last_heartbeat":  &now,
-		"singbox_version": "installer-managed",
+		"health_status":       "online",
+		"last_heartbeat":      &now,
+		"singbox_version":     "installer-managed",
+		"reality_public_key":  installedMetadata.RealityPublicKey,
+		"reality_short_id":    installedMetadata.RealityShortID,
+		"reality_server_name": installedMetadata.RealityServerName,
 	}).Error
 
 	return &ReinstallNodeResult{

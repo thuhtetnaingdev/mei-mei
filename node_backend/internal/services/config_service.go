@@ -158,6 +158,9 @@ func (s *ConfigService) Status() map[string]interface{} {
 		"lastError":          s.lastError,
 		"activeUsers":        s.activeUsers,
 		"bandwidthUsedBytes": bandwidthUsedBytes,
+		"realityPublicKey":   s.cfg.VLESSRealityPublicKey,
+		"realityShortId":     s.cfg.VLESSRealityShortID,
+		"realityServerName":  s.cfg.VLESSRealityServerName,
 		"status":             "ok",
 		"bandwidthTracker":   trackerStatus,
 	}
