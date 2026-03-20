@@ -183,7 +183,7 @@ func (s *BandwidthCollectorService) collectFromNode(node *models.Node) error {
 	disabledAnyUser := false
 	for _, user := range usage.Users {
 		if user.Bytes > 0 {
-			disabled, err := s.updateUserUsage(user.UUID, user.Bytes)
+			disabled, err := s.updateUserUsage(node.Name, user.UUID, user.Bytes)
 			if err != nil {
 				log.Printf("[bandwidth-collector] failed to update user %s usage: %v", user.UUID, err)
 			}
@@ -215,13 +215,13 @@ func (s *BandwidthCollectorService) collectFromNode(node *models.Node) error {
 }
 
 // updateUserUsage updates the bandwidth usage for a specific user
-func (s *BandwidthCollectorService) updateUserUsage(uuid string, bytes int64) (bool, error) {
+func (s *BandwidthCollectorService) updateUserUsage(nodeName string, uuid string, bytes int64) (bool, error) {
 	if uuid == "" || bytes <= 0 {
 		return false, nil
 	}
 
 	if s.userService != nil {
-		disabled, err := s.userService.AddUsageAndDisableIfLimitReached(uuid, bytes)
+		disabled, _, err := s.userService.RecordUsageOnNode(uuid, nodeName, bytes)
 		if err != nil {
 			return false, fmt.Errorf("database update failed: %w", err)
 		}

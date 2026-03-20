@@ -4,6 +4,7 @@ import "time"
 
 type Node struct {
 	ID                 uint       `json:"id" gorm:"primaryKey"`
+	MinerID            *uint      `json:"minerId"`
 	Name               string     `json:"name" gorm:"uniqueIndex;not null"`
 	BaseURL            string     `json:"baseUrl" gorm:"not null"`
 	Location           string     `json:"location"`
@@ -19,6 +20,7 @@ type Node struct {
 	ExpiresAt          *time.Time `json:"expiresAt"`
 	BandwidthLimitGB   int64      `json:"bandwidthLimitGb"`
 	BandwidthUsedBytes int64      `json:"bandwidthUsedBytes"`
+	RewardedTokens     float64    `json:"rewardedTokens"`
 	RealityPublicKey   string     `json:"realityPublicKey"`
 	RealityShortID     string     `json:"realityShortId"`
 	RealityServerName  string     `json:"realityServerName"`

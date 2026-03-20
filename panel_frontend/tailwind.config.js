@@ -11,7 +11,8 @@ export default {
         pine: "#0d5c4f"
       },
       boxShadow: {
-        panel: "0 20px 60px rgba(12, 18, 34, 0.12)"
+        panel: "0 28px 80px rgba(3, 9, 20, 0.42)",
+        glow: "0 0 0 1px rgba(148, 163, 184, 0.08), 0 24px 64px rgba(8, 18, 35, 0.38)"
       },
       fontFamily: {
         sans: ["'IBM Plex Sans'", "sans-serif"],

@@ -26,7 +26,7 @@ This repository contains a scalable control-plane/data-plane proxy management sy
 
 ## One-Line Install
 
-Panel backend:
+Panel frontend + backend:
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/thuhtetnaingdev/mei-mei/main/install/panel.sh)
@@ -40,7 +40,9 @@ MEIMEI_CONTROL_PLANE_TOKEN="<panel NODE_SHARED_TOKEN>" bash <(curl -fsSL https:/
 
 Notes:
 
+- The panel installer now installs both `panel_backend` and `panel_frontend`, builds the frontend on the server, creates two systemd services, and auto-connects the UI to the backend.
 - The panel installer creates `/opt/meimei-panel/.env` if it does not exist and prints the generated admin password plus `NODE_SHARED_TOKEN`.
+- By default the backend runs on `:8080` and the frontend runs on `:5173`. You can override them with `MEIMEI_PANEL_PORT` and `MEIMEI_FRONTEND_PORT`.
 - The node installer installs `sing-box`, writes `/opt/meimei-node/.env`, creates TLS files, opens the standard ports when `ufw` is present, and prints the generated `NODE_TOKEN`.
 - Release assets are published automatically when you push a tag like `v1.0.0`.
 

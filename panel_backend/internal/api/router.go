@@ -22,7 +22,9 @@ type Handler struct {
 	jwt                    *auth.JWTManager
 	adminService           *services.AdminService
 	userService            *services.UserService
+	minerService           *services.MinerService
 	nodeService            *services.NodeService
+	mintPoolService        *services.MintPoolService
 	bandwidthReportService *services.BandwidthReportService
 	bandwidthCollector     *services.BandwidthCollectorService
 }
@@ -44,10 +46,7 @@ func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services.UserService, nodeService *services.NodeService, bandwidthCollector *services.BandwidthCollectorService) *gin.Engine {
 	router := gin.Default()
 	router.Use(cors.New(cors.Config{
-		AllowOrigins: []string{
-			"http://localhost:5173",
-			"http://127.0.0.1:5173",
-		},
+		AllowOrigins: cfg.AllowedOrigins,
 		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders: []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		MaxAge:       12 * time.Hour,
@@ -58,6 +57,8 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 		jwt:                    auth.NewJWTManager(cfg.JWTSecret),
 		adminService:           services.NewAdminService(db, cfg.AdminUsername, cfg.AdminPassword),
 		userService:            userService,
+		minerService:           services.NewMinerService(db),
+		mintPoolService:        services.NewMintPoolService(db),
 		bandwidthReportService: services.NewBandwidthReportService(db),
 		nodeService:            nodeService,
 		bandwidthCollector:     bandwidthCollector,
@@ -83,8 +84,18 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 		protected.POST("/users", handler.createUser)
 		protected.GET("/users", handler.listUsers)
 		protected.GET("/users/:id", handler.getUser)
+		protected.GET("/users/:id/records", handler.listUserRecords)
+		protected.POST("/users/:id/bandwidth-allocations", handler.addUserBandwidthAllocation)
+		protected.PATCH("/users/:id/bandwidth-allocations/:allocationId", handler.updateUserBandwidthAllocation)
+		protected.POST("/users/:id/bandwidth-allocations/:allocationId/adjust", handler.adjustUserBandwidthAllocation)
+		protected.POST("/users/:id/bandwidth-reductions", handler.reduceUserBandwidthAllocation)
 		protected.PATCH("/users/:id", handler.updateUser)
 		protected.DELETE("/users/:id", handler.deleteUser)
+		protected.POST("/miners", handler.createMiner)
+		protected.GET("/miners", handler.listMiners)
+		protected.GET("/miners/:id", handler.getMiner)
+		protected.PATCH("/miners/:id", handler.updateMiner)
+		protected.DELETE("/miners/:id", handler.deleteMiner)
 
 		protected.POST("/nodes/register", handler.registerNode)
 		protected.POST("/nodes/bootstrap", handler.bootstrapNode)
@@ -98,9 +109,50 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 		protected.GET("/bandwidth/status", handler.getBandwidthCollectorStatus)
 		protected.GET("/admin/profile", handler.getAdminProfile)
 		protected.PUT("/admin/credentials", handler.updateAdminCredentials)
+		protected.GET("/settings/distribution", handler.getDistributionSettings)
+		protected.PUT("/settings/distribution", handler.updateDistributionSettings)
+		protected.GET("/mint-pool", handler.getMintPool)
+		protected.POST("/mint-pool/mint", handler.mintPool)
+		protected.DELETE("/mint-pool", handler.resetMintPool)
 	}
 
 	return router
+}
+
+func (h *Handler) getMintPool(c *gin.Context) {
+	snapshot, err := h.mintPoolService.GetSnapshot()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, snapshot)
+}
+
+func (h *Handler) mintPool(c *gin.Context) {
+	var input services.MintPoolMintInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	snapshot, err := h.mintPoolService.Mint(input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, snapshot)
+}
+
+func (h *Handler) resetMintPool(c *gin.Context) {
+	snapshot, err := h.mintPoolService.Reset()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, snapshot)
 }
 
 func (h *Handler) login(c *gin.Context) {
@@ -148,6 +200,31 @@ func (h *Handler) updateAdminCredentials(c *gin.Context) {
 	c.JSON(http.StatusOK, profile)
 }
 
+func (h *Handler) getDistributionSettings(c *gin.Context) {
+	settings, err := h.adminService.GetDistributionSettings()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, settings)
+}
+
+func (h *Handler) updateDistributionSettings(c *gin.Context) {
+	var input services.DistributionSettings
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	settings, err := h.adminService.UpdateDistributionSettings(input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, settings)
+}
+
 func (h *Handler) createUser(c *gin.Context) {
 	var input services.CreateUserInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -157,11 +234,73 @@ func (h *Handler) createUser(c *gin.Context) {
 
 	user, err := h.userService.Create(input)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusCreated, user)
+}
+
+func (h *Handler) createMiner(c *gin.Context) {
+	var input services.CreateMinerInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	miner, err := h.minerService.Create(input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, miner)
+}
+
+func (h *Handler) listMiners(c *gin.Context) {
+	miners, err := h.minerService.List()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, miners)
+}
+
+func (h *Handler) getMiner(c *gin.Context) {
+	miner, err := h.minerService.GetByID(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "miner not found"})
+		return
+	}
+	c.JSON(http.StatusOK, miner)
+}
+
+func (h *Handler) updateMiner(c *gin.Context) {
+	var input services.UpdateMinerInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	miner, err := h.minerService.Update(c.Param("id"), input)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "miner not found"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, miner)
+}
+
+func (h *Handler) deleteMiner(c *gin.Context) {
+	if err := h.minerService.Delete(c.Param("id")); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "miner not found"})
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *Handler) listUsers(c *gin.Context) {
@@ -179,6 +318,79 @@ func (h *Handler) getUser(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
 	}
+	c.JSON(http.StatusOK, user)
+}
+
+func (h *Handler) listUserRecords(c *gin.Context) {
+	records, err := h.userService.ListRecords(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, records)
+}
+
+func (h *Handler) addUserBandwidthAllocation(c *gin.Context) {
+	var input services.UserBandwidthAllocationInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user, err := h.userService.AddBandwidthAllocation(c.Param("id"), input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, user)
+}
+
+func (h *Handler) updateUserBandwidthAllocation(c *gin.Context) {
+	var input services.UserBandwidthAllocationUpdateInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user, err := h.userService.UpdateBandwidthAllocation(c.Param("id"), c.Param("allocationId"), input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, user)
+}
+
+func (h *Handler) adjustUserBandwidthAllocation(c *gin.Context) {
+	var input services.UserBandwidthAllocationAdjustmentInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user, err := h.userService.AdjustBandwidthAllocation(c.Param("id"), c.Param("allocationId"), input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, user)
+}
+
+func (h *Handler) reduceUserBandwidthAllocation(c *gin.Context) {
+	var input services.UserBandwidthReductionInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user, err := h.userService.ReduceBandwidthAllocation(c.Param("id"), input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	c.JSON(http.StatusOK, user)
 }
 

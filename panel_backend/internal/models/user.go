@@ -3,14 +3,62 @@ package models
 import "time"
 
 type User struct {
-	ID                 uint       `json:"id" gorm:"primaryKey"`
-	UUID               string     `json:"uuid" gorm:"uniqueIndex;not null"`
-	Email              string     `json:"email" gorm:"uniqueIndex;not null"`
-	Enabled            bool       `json:"enabled" gorm:"default:true"`
-	ExpiresAt          *time.Time `json:"expiresAt"`
-	BandwidthLimitGB   int64      `json:"bandwidthLimitGb"`
-	BandwidthUsedBytes int64      `json:"bandwidthUsedBytes"`
-	Notes              string     `json:"notes"`
-	CreatedAt          time.Time  `json:"createdAt"`
-	UpdatedAt          time.Time  `json:"updatedAt"`
+	ID                   uint                      `json:"id" gorm:"primaryKey"`
+	UUID                 string                    `json:"uuid" gorm:"uniqueIndex;not null"`
+	Email                string                    `json:"email" gorm:"uniqueIndex;not null"`
+	Enabled              bool                      `json:"enabled" gorm:"default:true"`
+	ExpiresAt            *time.Time                `json:"expiresAt"`
+	BandwidthLimitGB     int64                     `json:"bandwidthLimitGb"`
+	BandwidthUsedBytes   int64                     `json:"bandwidthUsedBytes"`
+	TokenBalance         float64                   `json:"tokenBalance"`
+	Notes                string                    `json:"notes"`
+	BandwidthAllocations []UserBandwidthAllocation `json:"bandwidthAllocations" gorm:"constraint:OnDelete:CASCADE;"`
+	CreatedAt            time.Time                 `json:"createdAt"`
+	UpdatedAt            time.Time                 `json:"updatedAt"`
+}
+
+type UserBandwidthAllocation struct {
+	ID                      uint                      `json:"id" gorm:"primaryKey"`
+	UserID                  uint                      `json:"userId" gorm:"index;not null"`
+	TotalBandwidthBytes     int64                     `json:"totalBandwidthBytes" gorm:"not null"`
+	RemainingBandwidthBytes int64                     `json:"remainingBandwidthBytes" gorm:"not null"`
+	TokenAmount             float64                   `json:"tokenAmount" gorm:"not null"`
+	RemainingTokens         float64                   `json:"remainingTokens" gorm:"not null"`
+	AdminPercent            float64                   `json:"adminPercent"`
+	UsagePoolPercent        float64                   `json:"usagePoolPercent"`
+	ReservePoolPercent      float64                   `json:"reservePoolPercent"`
+	AdminAmount             float64                   `json:"adminAmount"`
+	UsagePoolTotal          float64                   `json:"usagePoolTotal"`
+	UsagePoolDistributed    float64                   `json:"usagePoolDistributed"`
+	ReservePoolTotal        float64                   `json:"reservePoolTotal"`
+	ReservePoolDistributed  float64                   `json:"reservePoolDistributed"`
+	SettlementStatus        string                    `json:"settlementStatus"`
+	SettlementWarning       string                    `json:"settlementWarning"`
+	SettledAt               *time.Time                `json:"settledAt"`
+	ExpiresAt               *time.Time                `json:"expiresAt"`
+	NodeUsages              []UserBandwidthNodeUsage  `json:"nodeUsages" gorm:"foreignKey:AllocationID;constraint:OnDelete:CASCADE;"`
+	CreatedAt               time.Time                 `json:"createdAt"`
+	UpdatedAt               time.Time                 `json:"updatedAt"`
+}
+
+type UserBandwidthNodeUsage struct {
+	ID             uint      `json:"id" gorm:"primaryKey"`
+	AllocationID   uint      `json:"allocationId" gorm:"index;not null"`
+	UserID         uint      `json:"userId" gorm:"index;not null"`
+	NodeID         uint      `json:"nodeId" gorm:"index;not null"`
+	MinerID        *uint     `json:"minerId" gorm:"index"`
+	BandwidthBytes int64     `json:"bandwidthBytes" gorm:"not null"`
+	RewardedTokens float64   `json:"rewardedTokens" gorm:"not null"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+type UserRecord struct {
+	ID        uint      `json:"id" gorm:"primaryKey"`
+	UserID    uint      `json:"userId" gorm:"index;not null"`
+	Action    string    `json:"action" gorm:"not null"`
+	Title     string    `json:"title" gorm:"not null"`
+	Details   string    `json:"details"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }

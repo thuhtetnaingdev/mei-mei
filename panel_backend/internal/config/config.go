@@ -18,6 +18,7 @@ type Config struct {
 	AdminPassword       string
 	BaseSubscriptionURL string
 	BasePublicURL       string
+	AllowedOrigins      []string
 	NodeSharedToken     string
 	SyncTimeoutSeconds  int
 }
@@ -33,12 +34,33 @@ func Load() Config {
 		AdminUsername:       getEnv("ADMIN_USERNAME", "admin"),
 		AdminPassword:       getEnv("ADMIN_PASSWORD", "admin"),
 		BaseSubscriptionURL: getEnv("BASE_SUBSCRIPTION_URL", "http://localhost:8080/subscription"),
+		AllowedOrigins:      getEnvAsSlice("ALLOWED_ORIGINS", []string{"http://localhost:5173", "http://127.0.0.1:5173"}),
 		NodeSharedToken:     mustEnv("NODE_SHARED_TOKEN"),
 		SyncTimeoutSeconds:  getEnvAsInt("SYNC_TIMEOUT_SECONDS", 10),
 	}
 	cfg.BasePublicURL = getEnv("BASE_PUBLIC_URL", strings.TrimSuffix(cfg.BaseSubscriptionURL, "/subscription"))
 
 	return cfg
+}
+
+func getEnvAsSlice(key string, fallback []string) []string {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	if len(result) == 0 {
+		return fallback
+	}
+	return result
 }
 
 func getEnv(key, fallback string) string {

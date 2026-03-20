@@ -3,6 +3,8 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AppLayout } from "./layouts/AppLayout";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
+import { MintPoolPage } from "./pages/MintPoolPage";
+import { MinersPage } from "./pages/MinersPage";
 import { NodesPage } from "./pages/NodesPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { UsersPage } from "./pages/UsersPage";
@@ -14,6 +16,8 @@ export default function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/mint-pool" element={<MintPoolPage />} />
+          <Route path="/miners" element={<MinersPage />} />
           <Route path="/users" element={<UsersPage />} />
           <Route path="/nodes" element={<NodesPage />} />
           <Route path="/settings" element={<SettingsPage />} />

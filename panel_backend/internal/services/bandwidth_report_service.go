@@ -51,7 +51,7 @@ func (s *BandwidthReportService) ProcessReport(report BandwidthReport, nodeName 
 
 	// Process each user's usage
 	for _, usage := range report.UserUsage {
-		if err := s.updateUserUsage(usage); err != nil {
+		if err := s.updateUserUsage(report.NodeName, usage); err != nil {
 			log.Printf("[bandwidth-report] failed to update usage for user %s: %v", usage.UUID, err)
 			// Continue processing other users even if one fails
 		}
@@ -100,24 +100,15 @@ func (s *BandwidthReportService) validateReport(report BandwidthReport) error {
 }
 
 // updateUserUsage updates the bandwidth usage for a specific user
-func (s *BandwidthReportService) updateUserUsage(usage UserUsageReport) error {
+func (s *BandwidthReportService) updateUserUsage(nodeName string, usage UserUsageReport) error {
 	if usage.UUID == "" || usage.BytesUsed <= 0 {
 		return nil // Skip invalid or zero usage
 	}
 
-	// Use UpdateColumn to atomically add to the existing value
-	// This prevents race conditions when multiple reports arrive simultaneously
-	result := s.db.Model(&models.User{}).
-		Where("uuid = ?", usage.UUID).
-		UpdateColumn("bandwidth_used_bytes", gorm.Expr("bandwidth_used_bytes + ?", usage.BytesUsed))
-
-	if result.Error != nil {
-		return fmt.Errorf("database update failed: %w", result.Error)
-	}
-
-	if result.RowsAffected == 0 {
-		log.Printf("[bandwidth-report] user %s not found, skipping usage update", usage.UUID)
-		return nil // User not found, but not an error
+	userService := NewUserService(s.db)
+	_, _, err := userService.RecordUsageOnNode(usage.UUID, nodeName, usage.BytesUsed)
+	if err != nil {
+		return fmt.Errorf("database update failed: %w", err)
 	}
 
 	log.Printf("[bandwidth-report] updated user %s: +%d bytes", usage.UUID, usage.BytesUsed)
@@ -198,10 +189,10 @@ func (s *BandwidthReportService) GetUsageSummary() (map[string]interface{}, erro
 
 	// Get top users by usage
 	type UserUsage struct {
-		UUID      string
-		Email     string
-		Usage     int64
-		Limit     int64
+		UUID         string
+		Email        string
+		Usage        int64
+		Limit        int64
 		UsagePercent float64
 	}
 

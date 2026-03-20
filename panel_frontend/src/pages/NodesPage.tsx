@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Globe, Plus, RefreshCw, ServerCog, ShieldCheck, Trash2, Wrench } from "lucide-react";
 import api from "../api/client";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { SectionCard } from "../components/SectionCard";
@@ -14,11 +14,27 @@ interface BootstrapResult {
   error?: string;
 }
 
+const emptyBootstrapForm = {
+  name: "",
+  ip: "",
+  username: "",
+  password: "",
+  location: "",
+  publicHost: "",
+  sshPort: "22",
+  nodePort: "9090",
+  vlessPort: "443",
+  tuicPort: "8443",
+  hysteria2Port: "9443",
+  singboxReloadCommand: "systemctl restart meimei-sing-box.service"
+};
+
 export function NodesPage() {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [bootstrapLog, setBootstrapLog] = useState<string[]>([]);
   const [bootstrapJobId, setBootstrapJobId] = useState("");
   const [isBootstrapping, setIsBootstrapping] = useState(false);
+  const [createNodeDialogOpen, setCreateNodeDialogOpen] = useState(false);
   const [nodeActionStatus, setNodeActionStatus] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Node | null>(null);
   const [reinstallTarget, setReinstallTarget] = useState<Node | null>(null);
@@ -30,20 +46,7 @@ export function NodesPage() {
     bandwidthLimitGb: "0",
     expiresAt: ""
   });
-  const [form, setForm] = useState({
-    name: "",
-    ip: "",
-    username: "",
-    password: "",
-    location: "",
-    publicHost: "",
-    sshPort: "22",
-    nodePort: "9090",
-    vlessPort: "443",
-    tuicPort: "8443",
-    hysteria2Port: "9443",
-    singboxReloadCommand: "systemctl restart meimei-sing-box.service"
-  });
+  const [form, setForm] = useState(emptyBootstrapForm);
 
   const loadNodes = () => api.get<Node[]>("/nodes").then((res) => setNodes(res.data));
 
@@ -66,20 +69,7 @@ export function NodesPage() {
             setIsBootstrapping(false);
             setBootstrapJobId("");
             setNodeActionStatus(`Node ${response.data.node?.name ?? ""} bootstrapped successfully.`.trim());
-            setForm({
-              name: "",
-              ip: "",
-              username: "",
-              password: "",
-              location: "",
-              publicHost: "",
-              sshPort: "22",
-              nodePort: "9090",
-              vlessPort: "443",
-              tuicPort: "8443",
-              hysteria2Port: "9443",
-              singboxReloadCommand: "systemctl restart meimei-sing-box.service"
-            });
+            setForm(emptyBootstrapForm);
             await loadNodes();
           }
 
@@ -112,16 +102,17 @@ export function NodesPage() {
       });
       setBootstrapJobId(response.data.id);
       setBootstrapLog(response.data.steps);
+      setCreateNodeDialogOpen(false);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Bootstrap failed";
       setBootstrapLog((current) => [...current, message]);
       setIsBootstrapping(false);
-    } finally {
     }
   };
 
   const syncNodes = async () => {
     await api.post("/nodes/sync");
+    setNodeActionStatus("Triggered full node sync.");
     await loadNodes();
   };
 
@@ -237,165 +228,269 @@ export function NodesPage() {
     return new Date(value).toLocaleString();
   };
 
-  return (
-    <div className="space-y-8">
-      <SectionCard
-        title="Bootstrap VPS Node"
-        description="Enter the VPS IP, username, and password. The panel will update the host, upload the node backend, install a systemd service, and register the node automatically."
-        action={
-          <button onClick={() => void syncNodes()} className="rounded-2xl bg-tide px-4 py-2 text-sm font-semibold text-white">
-            Sync All Nodes
-          </button>
-        }
-      >
-        <form className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" onSubmit={(event) => void bootstrapNode(event)}>
-          {bootstrapFields.map((field) => (
-            <label key={field.key} className="block">
-              <span className="mb-2 block text-sm font-semibold text-slate-700">{field.label}</span>
-              <input
-                type={field.type}
-                value={form[field.key]}
-                onChange={(event) => setForm((current) => ({ ...current, [field.key]: event.target.value }))}
-                placeholder={field.placeholder}
-                className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-tide"
-              />
-            </label>
-          ))}
-          <button disabled={isBootstrapping} className="rounded-2xl bg-ink px-4 py-3 text-sm font-semibold text-white disabled:opacity-60 md:col-span-2 xl:col-span-3">
-            {isBootstrapping ? "Bootstrapping..." : "Bootstrap Node"}
-          </button>
-        </form>
+  const onlineNodes = nodes.filter((node) => node.healthStatus === "online").length;
+  const offlineNodes = nodes.filter((node) => node.healthStatus === "offline").length;
 
-        {bootstrapLog.length > 0 ? (
-          <div className="mt-5 rounded-2xl bg-slate-50 p-4">
-            <p className="mb-3 text-sm font-semibold text-ink">Bootstrap Log</p>
-            <div className="space-y-2 text-sm text-slate-600">
-              {bootstrapLog.map((step) => (
-                <p key={step}>{step}</p>
+  return (
+    <div className="space-y-4">
+      <section className="grid gap-3 xl:grid-cols-[minmax(0,1.1fr),minmax(320px,0.9fr)]">
+        <SectionCard
+          eyebrow="Node Fleet"
+          title="Operate VPS nodes"
+          description="Provision new VPN nodes from a modal flow, keep metadata tidy, and expose health status from a denser infrastructure workspace."
+          className="!p-4 sm:!p-5"
+          action={
+            <div className="mt-1 flex flex-col items-stretch gap-2.5 sm:min-w-[160px]">
+              <button type="button" onClick={() => setCreateNodeDialogOpen(true)} className="btn-primary justify-center gap-1.5 px-3 py-2 text-sm">
+                <Plus className="h-3.5 w-3.5" />
+                Create
+              </button>
+              <button type="button" onClick={() => void syncNodes()} className="btn-secondary justify-center gap-1.5 px-3 py-2 text-sm">
+                <RefreshCw className="h-3.5 w-3.5" />
+                Sync
+              </button>
+            </div>
+          }
+        >
+          <div className="grid gap-2.5 sm:grid-cols-3">
+            <div className="panel-subtle p-3">
+              <p className="metric-kicker">Registered</p>
+              <p className="mt-2 font-display text-2xl font-bold text-white">{nodes.length}</p>
+            </div>
+            <div className="panel-subtle p-3">
+              <p className="metric-kicker">Online</p>
+              <p className="mt-2 font-display text-2xl font-bold text-emerald-300">{onlineNodes}</p>
+            </div>
+            <div className="panel-subtle p-3">
+              <p className="metric-kicker">Offline</p>
+              <p className="mt-2 font-display text-2xl font-bold text-rose-300">{offlineNodes}</p>
+            </div>
+          </div>
+        </SectionCard>
+
+        <div className="panel-surface p-4 sm:p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="metric-kicker">Ops Signals</p>
+              <h3 className="mt-1.5 font-display text-xl font-semibold text-white">Fleet summary</h3>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-sky-400/10 p-2.5 text-sky-300">
+              <Globe className="h-4.5 w-4.5" />
+            </div>
+          </div>
+          <div className="mt-4 grid gap-2.5">
+            {[
+              { label: "Online nodes", value: onlineNodes, icon: ShieldCheck, tone: "text-emerald-300 bg-emerald-500/10" },
+              { label: "Needs attention", value: offlineNodes, icon: Wrench, tone: "text-amber-200 bg-amber-500/10" },
+              { label: "Recent action", value: nodeActionStatus || "No recent changes", icon: ServerCog, tone: "text-sky-300 bg-sky-500/10" }
+            ].map((item) => (
+              <div key={item.label} className="panel-subtle p-3">
+                <div className="flex items-start gap-3">
+                  <div className={`rounded-xl p-2 ${item.tone}`}>
+                    <item.icon className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-300">{item.label}</p>
+                    <p className="mt-0.5 break-words text-sm text-white">{item.value}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {bootstrapLog.length > 0 ? (
+        <SectionCard
+          eyebrow="Provision Activity"
+          title={isBootstrapping ? "Node provisioning in progress" : "Latest provisioning run"}
+          description="Bootstrap progress stays visible here after the modal is submitted."
+        >
+          <div className="panel-subtle p-4">
+            <p className="metric-kicker">Bootstrap Log</p>
+            <div className="mt-4 space-y-2 text-sm text-slate-300">
+              {bootstrapLog.map((step, index) => (
+                <p key={`${step}-${index}`}>{step}</p>
               ))}
             </div>
           </div>
-        ) : null}
-      </SectionCard>
+        </SectionCard>
+      ) : null}
 
-      <SectionCard title="Nodes" description="The control plane stores metadata, health, and last sync times for each data-plane agent.">
-        {nodeActionStatus ? <p className="mb-4 text-sm text-slate-500">{nodeActionStatus}</p> : null}
-        <div className="grid gap-4 lg:grid-cols-2">
-          {nodes.map((node) => (
-            <div key={node.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-display text-xl text-ink">{node.name}</h3>
-                  <p className="text-sm text-slate-500">{node.location || "Unknown region"}</p>
+      <SectionCard eyebrow="Node Inventory" title="Registered nodes" description="Every node card is compact enough for mobile but still keeps operational actions one tap away.">
+        <div className="space-y-4">
+          {nodeActionStatus ? <p className="text-sm text-slate-400">{nodeActionStatus}</p> : null}
+          <div className="grid gap-4 xl:grid-cols-2">
+            {nodes.map((node) => (
+              <article key={node.id} className="panel-subtle p-5">
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h3 className="font-display text-xl text-white">{node.name}</h3>
+                      <p className="mt-1 text-sm text-slate-400">{node.location || "Unknown region"}</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`status-pill ${
+                        node.healthStatus === "online" ? "text-emerald-300" : node.healthStatus === "offline" ? "text-rose-300" : "text-slate-400"
+                      }`}>
+                        <span className={`h-2 w-2 rounded-full ${
+                          node.healthStatus === "online" ? "bg-emerald-400" : node.healthStatus === "offline" ? "bg-rose-400" : "bg-slate-500"
+                        }`} />
+                        {node.healthStatus}
+                      </span>
+                      <button onClick={() => openEditNode(node)} className="btn-secondary px-3 py-2 text-xs">
+                        Edit
+                      </button>
+                      <button onClick={() => setReinstallTarget(node)} disabled={isReinstalling} className="btn-primary px-3 py-2 text-xs">
+                        Reinstall
+                      </button>
+                      <button
+                        onClick={() => setDeleteTarget(node)}
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-rose-400/20 bg-rose-500/10 text-rose-200 transition hover:bg-rose-500/20"
+                        title="Delete node"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 text-sm sm:grid-cols-2">
+                    <div className="rounded-2xl border border-white/10 bg-slate-950/30 p-4">
+                      <p className="metric-kicker">Base URL</p>
+                      <p className="mt-2 break-all text-slate-200">{node.baseUrl}</p>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-slate-950/30 p-4">
+                      <p className="metric-kicker">Public Host</p>
+                      <p className="mt-2 break-all text-slate-200">{node.publicHost || "Not set"}</p>
+                    </div>
+                  </div>
+
+                  <dl className="grid gap-3 text-sm text-slate-300 sm:grid-cols-2">
+                    <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
+                      <dt className="metric-kicker">VLESS</dt>
+                      <dd className="mt-2 text-white">{node.vlessPort}</dd>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
+                      <dt className="metric-kicker">TUIC</dt>
+                      <dd className="mt-2 text-white">{node.tuicPort}</dd>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
+                      <dt className="metric-kicker">Hysteria2</dt>
+                      <dd className="mt-2 text-white">{node.hysteria2Port}</dd>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
+                      <dt className="metric-kicker">Bandwidth</dt>
+                      <dd className="mt-2 text-white">
+                        {node.bandwidthLimitGb > 0 ? `${node.bandwidthLimitGb} GB cap` : "Unlimited"}
+                      </dd>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
+                      <dt className="metric-kicker">Usage</dt>
+                      <dd className="mt-2 text-white">{formatBytes(node.bandwidthUsedBytes)}</dd>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-slate-950/25 p-4">
+                      <dt className="metric-kicker">Expires</dt>
+                      <dd className="mt-2 text-white">{formatDateTime(node.expiresAt)}</dd>
+                    </div>
+                  </dl>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => openEditNode(node)}
-                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => setReinstallTarget(node)}
-                    disabled={isReinstalling}
-                    className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 disabled:opacity-60"
-                  >
-                    Reinstall
-                  </button>
-                  <button
-                    onClick={() => setDeleteTarget(node)}
-                    className="rounded-full border border-rose-200 bg-transparent p-2 text-rose-600 hover:bg-rose-50"
-                    title="Delete node"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-              <dl className="mt-4 space-y-2 text-sm text-slate-600">
-                <div className="flex justify-between gap-4"><dt>Status</dt><dd><span className={`inline-flex items-center gap-1.5 ${
-                  node.healthStatus === "online" 
-                    ? "text-emerald-700" 
-                    : node.healthStatus === "offline"
-                    ? "text-rose-700"
-                    : "text-slate-600"
-                }`}><span className={`inline-block h-2 w-2 rounded-full ${
-                  node.healthStatus === "online" 
-                    ? "bg-emerald-500" 
-                    : node.healthStatus === "offline"
-                    ? "bg-rose-500"
-                    : "bg-slate-400"
-                }`}></span>{node.healthStatus}</span></dd></div>
-                <div className="flex justify-between gap-4"><dt>Base URL</dt><dd>{node.baseUrl}</dd></div>
-                <div className="flex justify-between gap-4"><dt>Public Host</dt><dd>{node.publicHost}</dd></div>
-                <div className="flex justify-between gap-4"><dt>VLESS</dt><dd>{node.vlessPort}</dd></div>
-                <div className="flex justify-between gap-4"><dt>TUIC</dt><dd>{node.tuicPort}</dd></div>
-                <div className="flex justify-between gap-4"><dt>Hysteria2</dt><dd>{node.hysteria2Port}</dd></div>
-                <div className="flex justify-between gap-4"><dt>Bandwidth Limit</dt><dd>{node.bandwidthLimitGb > 0 ? `${node.bandwidthLimitGb} GB` : "Unlimited"}</dd></div>
-                <div className="flex justify-between gap-4"><dt>Bandwidth Usage</dt><dd>{formatBytes(node.bandwidthUsedBytes)}</dd></div>
-                <div className="flex justify-between gap-4"><dt>Expires At</dt><dd>{formatDateTime(node.expiresAt)}</dd></div>
-              </dl>
-            </div>
-          ))}
+              </article>
+            ))}
+          </div>
         </div>
       </SectionCard>
+
+      <ConfirmDialog
+        open={createNodeDialogOpen}
+        title="Provision New Node"
+        description="Enter VPS credentials and transport ports. The panel will upload the node backend, install services, and register the node automatically."
+        hideActions
+        panelClassName="max-w-6xl"
+        onCancel={() => setCreateNodeDialogOpen(false)}
+        onConfirm={() => undefined}
+      >
+        <form className="space-y-5" onSubmit={(event) => void bootstrapNode(event)}>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {bootstrapFields.map((field) => (
+              <label key={field.key} className="block">
+                <span className="mb-2 block text-sm font-semibold text-slate-300">{field.label}</span>
+                <input
+                  type={field.type}
+                  value={form[field.key]}
+                  onChange={(event) => setForm((current) => ({ ...current, [field.key]: event.target.value }))}
+                  placeholder={field.placeholder}
+                  className="input-shell"
+                />
+              </label>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap justify-end gap-3">
+            <button type="button" onClick={() => setCreateNodeDialogOpen(false)} className="btn-secondary">
+              Cancel
+            </button>
+            <button disabled={isBootstrapping} className="btn-primary">
+              {isBootstrapping ? "Bootstrapping..." : "Create New Node"}
+            </button>
+          </div>
+        </form>
+      </ConfirmDialog>
+
       <ConfirmDialog
         open={Boolean(editingNode)}
         title="Update Node"
-        description="Update node metadata such as bandwidth limit and expiry date."
+        description="Update node metadata such as public host, bandwidth limit, and expiry."
         hideActions
         onCancel={closeEditNode}
         onConfirm={() => undefined}
       >
         <form className="space-y-4" onSubmit={(event) => void saveNodeDetails(event)}>
           <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-slate-700">Location</span>
+            <span className="mb-2 block text-sm font-semibold text-slate-300">Location</span>
             <input
               value={nodeEditForm.location}
               onChange={(event) => setNodeEditForm((current) => ({ ...current, location: event.target.value }))}
-              className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-tide"
+              className="input-shell"
             />
           </label>
           <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-slate-700">Public Host</span>
+            <span className="mb-2 block text-sm font-semibold text-slate-300">Public Host</span>
             <input
               value={nodeEditForm.publicHost}
               onChange={(event) => setNodeEditForm((current) => ({ ...current, publicHost: event.target.value }))}
-              className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-tide"
+              className="input-shell"
             />
           </label>
           <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-slate-700">Bandwidth Limit (GB)</span>
+            <span className="mb-2 block text-sm font-semibold text-slate-300">Bandwidth Limit (GB)</span>
             <input
               type="number"
               min={0}
               value={nodeEditForm.bandwidthLimitGb}
               onChange={(event) => setNodeEditForm((current) => ({ ...current, bandwidthLimitGb: event.target.value }))}
-              className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-tide"
+              className="input-shell"
             />
           </label>
           <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-slate-700">Expiry Date</span>
+            <span className="mb-2 block text-sm font-semibold text-slate-300">Expiry Date</span>
             <input
               type="datetime-local"
               value={nodeEditForm.expiresAt}
               onChange={(event) => setNodeEditForm((current) => ({ ...current, expiresAt: event.target.value }))}
-              className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-tide"
+              className="input-shell"
             />
           </label>
-          <div className="flex justify-end gap-3">
-            <button
-              type="button"
-              onClick={closeEditNode}
-              className="rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-            >
+          <div className="flex flex-wrap justify-end gap-3">
+            <button type="button" onClick={closeEditNode} className="btn-secondary">
               Cancel
             </button>
-            <button type="submit" className="rounded-2xl bg-ink px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
+            <button type="submit" className="btn-primary">
               Save Node
             </button>
           </div>
         </form>
       </ConfirmDialog>
+
       <ConfirmDialog
         open={Boolean(deleteTarget)}
         title="Delete node?"
@@ -405,6 +500,7 @@ export function NodesPage() {
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => void deleteNode()}
       />
+
       <ConfirmDialog
         open={Boolean(reinstallTarget)}
         title="Reinstall node?"

@@ -20,49 +20,49 @@ export function BandwidthUsage({ usedBytes, limitGb, showDetails = true }: Bandw
 
   // Determine progress bar color based on usage
   const getProgressColor = () => {
-    if (isUnlimited) return "bg-slate-300";
+    if (isUnlimited) return "bg-slate-400";
     if (isExceeded) return "bg-rose-500";
     if (percentage >= 90) return "bg-rose-500";
-    if (percentage >= 70) return "bg-amber-500";
-    return "bg-tide";
+    if (percentage >= 70) return "bg-amber-400";
+    return "bg-sky-400";
   };
 
   if (isUnlimited) {
     return (
-      <div className="space-y-1">
+      <div className="space-y-2">
         <div className="flex items-center justify-between text-xs">
-          <span className="font-medium text-slate-600">{formatBytes(usedBytes)} used</span>
-          <span className="text-slate-400">Unlimited</span>
+          <span className="font-medium text-slate-200">{formatBytes(usedBytes)} used</span>
+          <span className="text-slate-500">Unlimited</span>
         </div>
-        <div className="h-2 w-full rounded-full bg-slate-200">
-          <div className="h-2 rounded-full bg-slate-300" style={{ width: "100%" }} />
+        <div className="h-2 w-full rounded-full bg-white/10">
+          <div className="h-2 rounded-full bg-slate-400" style={{ width: "100%" }} />
         </div>
         {showDetails && (
-          <p className="text-xs text-slate-400">No bandwidth limit set for this user</p>
+          <p className="text-xs text-slate-500">No bandwidth limit set for this user</p>
         )}
       </div>
     );
   }
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-2">
       <div className="flex items-center justify-between text-xs">
-        <span className={`font-medium ${isExceeded ? "text-rose-600" : "text-slate-600"}`}>
+        <span className={`font-medium ${isExceeded ? "text-rose-400" : "text-slate-200"}`}>
           {formatBytes(usedBytes)} used
         </span>
-        <span className={`${isExceeded ? "text-rose-600 font-semibold" : "text-slate-500"}`}>
+        <span className={`${isExceeded ? "font-semibold text-rose-400" : "text-slate-400"}`}>
           {limitGb} GB limit
           {isExceeded && " (Exceeded!)"}
         </span>
       </div>
-      <div className="h-2 w-full rounded-full bg-slate-200">
+      <div className="h-2 w-full rounded-full bg-white/10">
         <div
           className={`h-2 rounded-full transition-all duration-300 ${getProgressColor()}`}
           style={{ width: `${Math.min(percentage, 100)}%` }}
         />
       </div>
       {showDetails && (
-        <p className={`text-xs ${isExceeded ? "text-rose-500 font-medium" : "text-slate-400"}`}>
+        <p className={`text-xs ${isExceeded ? "font-medium text-rose-400" : "text-slate-500"}`}>
           {percentage.toFixed(1)}% used
           {isExceeded && ` • ${formatBytes(usedBytes - limitBytes)} over limit`}
         </p>
