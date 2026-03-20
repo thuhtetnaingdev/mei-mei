@@ -3,6 +3,7 @@ package singbox
 import "encoding/json"
 
 type User struct {
+	ID               uint   `json:"id"`
 	UUID             string `json:"uuid"`
 	Email            string `json:"email"`
 	Enabled          bool   `json:"enabled"`
@@ -41,7 +42,8 @@ func Generate(nodeName, publicHost string, realityPrivateKey, realityServerName,
 	}
 
 	layout := BuildTransportLayout(nodeName, publicHost, realitySNIs, hysteria2Masquerades)
-	inbounds := make([]map[string]interface{}, 0, len(layout.VLESS)+len(layout.Hysteria2)+1)
+	shadowsocksPlans := BuildShadowsocksInboundPlans(nodeName, publicHost, users)
+	inbounds := make([]map[string]interface{}, 0, len(layout.VLESS)+len(layout.Hysteria2)+len(shadowsocksPlans)+1)
 
 	for _, plan := range layout.VLESS {
 		handshakeTarget := handshakeServer
@@ -84,6 +86,21 @@ func Generate(nodeName, publicHost string, realityPrivateKey, realityServerName,
 				"server_name":      tlsServerName,
 				"certificate_path": tlsCertPath,
 				"key_path":         tlsKeyPath,
+			},
+		})
+	}
+
+	for _, plan := range shadowsocksPlans {
+		inbounds = append(inbounds, map[string]interface{}{
+			"type":        "shadowsocks",
+			"tag":         plan.Tag,
+			"listen":      "::",
+			"listen_port": plan.Port,
+			"network":     "tcp",
+			"method":      shadowsocks2022Method,
+			"password":    plan.Password,
+			"multiplex": map[string]interface{}{
+				"enabled": true,
 			},
 		})
 	}

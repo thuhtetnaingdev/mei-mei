@@ -8,8 +8,8 @@ import (
 
 func GenerateSingboxProfile(user models.User, nodes []models.Node, settings services.ProtocolSettings) ([]byte, error) {
 	availableNodes := filterAvailableNodes(nodes)
-	proxyOutbounds := collectOutboundTags(availableNodes, settings)
-	urltestOutbounds := collectOutboundTags(availableNodes, settings)
+	proxyOutbounds := collectOutboundTags(user, availableNodes, settings)
+	urltestOutbounds := collectOutboundTags(user, availableNodes, settings)
 
 	outbounds := []map[string]interface{}{
 		{
@@ -72,6 +72,21 @@ func GenerateSingboxProfile(user models.User, nodes []models.Node, settings serv
 					"enabled":     true,
 					"insecure":    true,
 					"server_name": node.PublicHost,
+				},
+			})
+		}
+		shadowsocks := buildShadowsocksVariant(node, user)
+		if shadowsocks.Port > 0 {
+			outbounds = append(outbounds, map[string]interface{}{
+				"type":        "shadowsocks",
+				"tag":         shadowsocks.Tag,
+				"server":      node.PublicHost,
+				"server_port": shadowsocks.Port,
+				"method":      shadowsocks2022Method,
+				"password":    shadowsocks.Password,
+				"network":     "tcp",
+				"multiplex": map[string]interface{}{
+					"enabled": true,
 				},
 			})
 		}
@@ -152,7 +167,7 @@ func GenerateSingboxProfile(user models.User, nodes []models.Node, settings serv
 	return json.MarshalIndent(config, "", "  ")
 }
 
-func collectOutboundTags(nodes []models.Node, settings services.ProtocolSettings) []string {
+func collectOutboundTags(user models.User, nodes []models.Node, settings services.ProtocolSettings) []string {
 	tags := []string{}
 	for _, node := range nodes {
 		plan := buildNodeTransportPlan(node, settings)
@@ -161,6 +176,10 @@ func collectOutboundTags(nodes []models.Node, settings services.ProtocolSettings
 		}
 		if plan.TUIC.Port > 0 {
 			tags = append(tags, plan.TUIC.Tag)
+		}
+		shadowsocks := buildShadowsocksVariant(node, user)
+		if shadowsocks.Port > 0 {
+			tags = append(tags, shadowsocks.Tag)
 		}
 		for _, variant := range plan.Hysteria2 {
 			tags = append(tags, variant.Tag)

@@ -2,14 +2,23 @@ package singbox
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 )
 
 const (
-	portRangeStart = 20000
-	portRangeEnd   = 59999
+	portRangeStart                = 20000
+	portRangeEnd                  = 59999
+	shadowsocks2022Method         = "2022-blake3-chacha20-poly1305"
+	shadowsocksPrimaryPortStart   = 10000
+	shadowsocksPrimaryPortEnd     = 19999
+	shadowsocksSecondaryPortStart = 60000
+	shadowsocksSecondaryPortEnd   = 65023
+	shadowsocksPrimaryPortSlots   = shadowsocksPrimaryPortEnd - shadowsocksPrimaryPortStart + 1
+	shadowsocksSecondaryPortSlots = shadowsocksSecondaryPortEnd - shadowsocksSecondaryPortStart + 1
+	shadowsocksDedicatedPortSlots = shadowsocksPrimaryPortSlots + shadowsocksSecondaryPortSlots
 )
 
 type VLESSInboundPlan struct {
@@ -26,6 +35,14 @@ type TUICInboundPlan struct {
 }
 
 func (p TUICInboundPlan) GetPort() int { return p.Port }
+
+type ShadowsocksInboundPlan struct {
+	Tag      string
+	Port     int
+	Password string
+}
+
+func (p ShadowsocksInboundPlan) GetPort() int { return p.Port }
 
 type Hysteria2InboundPlan struct {
 	Tag           string
@@ -74,6 +91,32 @@ func BuildTransportLayout(nodeName, publicHost string, realitySNIs, masquerades 
 	return layout
 }
 
+func BuildShadowsocksInboundPlans(nodeName, publicHost string, users []User) []ShadowsocksInboundPlan {
+	plans := make([]ShadowsocksInboundPlan, 0, len(users))
+	for _, user := range users {
+		if !user.Enabled {
+			continue
+		}
+
+		plans = append(plans, ShadowsocksInboundPlan{
+			Tag:      fmt.Sprintf("shadowsocks-in-%d", user.ID),
+			Port:     shadowsocksPortForUserID(user.ID),
+			Password: ShadowsocksUserPassword(nodeName, publicHost, user.UUID),
+		})
+	}
+
+	return plans
+}
+
+func ShadowsocksUserPassword(nodeName, publicHost, userUUID string) string {
+	return deriveShadowsocks2022Key("user", nodeName, publicHost, userUUID)
+}
+
+func deriveShadowsocks2022Key(scope, nodeName, publicHost, identity string) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("ss2022|%s|%s|%s|%s", scope, nodeName, publicHost, identity)))
+	return base64.StdEncoding.EncodeToString(sum[:])
+}
+
 func obfuscationPassword(nodeName, publicHost, target string, index int) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%d|%s", nodeName, publicHost, index, target)))
 	return hex.EncodeToString(sum[:12])
@@ -92,4 +135,17 @@ func stableRandomPort(nodeName, publicHost, key string, usedPorts map[int]struct
 		return port
 	}
 	return portRangeStart
+}
+
+func shadowsocksPortForUserID(userID uint) int {
+	if userID == 0 {
+		return shadowsocksPrimaryPortStart
+	}
+
+	slot := int((userID - 1) % shadowsocksDedicatedPortSlots)
+	if slot < shadowsocksPrimaryPortSlots {
+		return shadowsocksPrimaryPortStart + slot
+	}
+
+	return shadowsocksSecondaryPortStart + (slot - shadowsocksPrimaryPortSlots)
 }

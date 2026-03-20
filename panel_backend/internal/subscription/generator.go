@@ -93,6 +93,19 @@ func GenerateNodeLinks(user models.User, nodes []models.Node, settings services.
 			links = append(links, NodeLink{NodeName: node.Name, Protocol: "tuic", URL: link})
 		}
 
+		shadowsocks := buildShadowsocksVariant(node, user)
+		if shadowsocks.Port > 0 {
+			credentials := base64.RawURLEncoding.EncodeToString([]byte(shadowsocks2022Method + ":" + shadowsocks.Password))
+			link := fmt.Sprintf(
+				"ss://%s@%s:%d#%s-SHADOWSOCKS",
+				credentials,
+				node.PublicHost,
+				shadowsocks.Port,
+				url.QueryEscape(node.Name),
+			)
+			links = append(links, NodeLink{NodeName: node.Name, Protocol: "shadowsocks", URL: link})
+		}
+
 		for _, variant := range plan.Hysteria2 {
 			hy2Query := url.Values{}
 			hy2Query.Set("sni", node.PublicHost)

@@ -77,6 +77,7 @@ type SyncPayload struct {
 }
 
 type SyncUser struct {
+	ID               uint   `json:"id"`
 	UUID             string `json:"uuid"`
 	Email            string `json:"email"`
 	Enabled          bool   `json:"enabled"`
@@ -530,6 +531,7 @@ func (s *NodeService) syncNode(node models.Node, users []models.User) error {
 	syncUsers := make([]SyncUser, 0, len(users))
 	for _, user := range users {
 		syncUsers = append(syncUsers, SyncUser{
+			ID:               user.ID,
 			UUID:             user.UUID,
 			Email:            user.Email,
 			Enabled:          user.Enabled,

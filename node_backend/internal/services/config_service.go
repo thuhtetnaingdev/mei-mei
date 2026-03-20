@@ -21,6 +21,7 @@ type ApplyConfigRequest struct {
 	RealitySNIs          []string `json:"realitySnis"`
 	Hysteria2Masquerades []string `json:"hysteria2Masquerades"`
 	Users                []struct {
+		ID               uint   `json:"id"`
 		UUID             string `json:"uuid"`
 		Email            string `json:"email"`
 		Enabled          bool   `json:"enabled"`
@@ -64,6 +65,7 @@ func (s *ConfigService) Apply(req ApplyConfigRequest) error {
 
 	for _, user := range req.Users {
 		singboxUser := singbox.User{
+			ID:               user.ID,
 			UUID:             user.UUID,
 			Email:            user.Email,
 			Enabled:          user.Enabled,
@@ -119,12 +121,16 @@ func (s *ConfigService) Apply(req ApplyConfigRequest) error {
 	}
 
 	layout := singbox.BuildTransportLayout(s.cfg.NodeName, s.cfg.PublicHost, req.RealitySNIs, req.Hysteria2Masquerades)
-	activePorts := make([]int, 0, len(layout.VLESS)+len(layout.Hysteria2)+1)
+	shadowsocksPlans := singbox.BuildShadowsocksInboundPlans(s.cfg.NodeName, s.cfg.PublicHost, users)
+	activePorts := make([]int, 0, len(layout.VLESS)+len(layout.Hysteria2)+len(shadowsocksPlans)+1)
 	for _, plan := range layout.VLESS {
 		activePorts = append(activePorts, plan.Port)
 	}
 	if layout.TUIC.Port > 0 {
 		activePorts = append(activePorts, layout.TUIC.Port)
+	}
+	for _, plan := range shadowsocksPlans {
+		activePorts = append(activePorts, plan.Port)
 	}
 	for _, plan := range layout.Hysteria2 {
 		activePorts = append(activePorts, plan.Port)
@@ -212,9 +218,13 @@ func (s *ConfigService) ensureFirewallPorts(req ApplyConfigRequest) error {
 
 	ports := make([]string, 0, 4)
 	layout := singbox.BuildTransportLayout(s.cfg.NodeName, s.cfg.PublicHost, req.RealitySNIs, req.Hysteria2Masquerades)
+	shadowsocksPlans := singbox.BuildShadowsocksInboundPlans(s.cfg.NodeName, s.cfg.PublicHost, usersFromApplyRequest(req.Users))
 	ports = appendPorts(ports, "tcp", layout.VLESS)
 	if layout.TUIC.Port > 0 {
 		ports = append(ports, fmt.Sprintf("%d/udp", layout.TUIC.Port))
+	}
+	for _, plan := range shadowsocksPlans {
+		ports = append(ports, fmt.Sprintf("%d/tcp", plan.Port))
 	}
 	ports = appendHy2Ports(ports, layout.Hysteria2)
 
@@ -235,6 +245,7 @@ func (s *ConfigService) setError(message string) {
 }
 
 func countEnabledUsers(users []struct {
+	ID               uint   `json:"id"`
 	UUID             string `json:"uuid"`
 	Email            string `json:"email"`
 	Enabled          bool   `json:"enabled"`
@@ -261,6 +272,26 @@ func appendHy2Ports(ports []string, plans []singbox.Hysteria2InboundPlan) []stri
 		ports = append(ports, strconv.Itoa(plan.GetPort())+"/udp")
 	}
 	return ports
+}
+
+func usersFromApplyRequest(users []struct {
+	ID               uint   `json:"id"`
+	UUID             string `json:"uuid"`
+	Email            string `json:"email"`
+	Enabled          bool   `json:"enabled"`
+	BandwidthLimitGB int64  `json:"bandwidthLimitGb"`
+}) []singbox.User {
+	result := make([]singbox.User, 0, len(users))
+	for _, user := range users {
+		result = append(result, singbox.User{
+			ID:               user.ID,
+			UUID:             user.UUID,
+			Email:            user.Email,
+			Enabled:          user.Enabled,
+			BandwidthLimitGB: user.BandwidthLimitGB,
+		})
+	}
+	return result
 }
 
 func (s *ConfigService) restoreTrackedUsersFromConfig() {
