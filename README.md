@@ -42,6 +42,7 @@ Notes:
 
 - The panel installer now installs both `panel_backend` and a prebuilt `panel_frontend` bundle, then serves them together from one backend service.
 - The panel installer creates `/opt/meimei-panel/.env` if it does not exist and prints the generated admin password plus `NODE_SHARED_TOKEN`.
+- The panel installer also installs a `mei` CLI. Run `mei uninstall` to remove the panel service, files, and SQLite database. Use `mei uninstall --yes` to skip the confirmation prompt.
 - By default the panel is available on `:8080`. You can override it with `MEIMEI_PANEL_PORT`.
 - The node installer installs `sing-box`, writes `/opt/meimei-node/.env`, creates TLS files, opens the standard ports when `ufw` is present, and prints the generated `NODE_TOKEN`.
 - Release assets are published automatically when you push a tag like `v1.0.0`.

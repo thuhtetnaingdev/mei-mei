@@ -6,6 +6,9 @@ VERSION="${MEIMEI_VERSION:-latest}"
 INSTALL_DIR="${MEIMEI_PANEL_DIR:-/opt/meimei-panel}"
 BACKEND_PORT="${MEIMEI_PANEL_PORT:-8080}"
 SERVICE_NAME="${MEIMEI_PANEL_SERVICE:-meimei-panel}"
+CLI_PATH="${MEIMEI_CLI_PATH:-/usr/local/bin/mei}"
+CLI_CONFIG_DIR="${MEIMEI_CLI_CONFIG_DIR:-/etc/meimei}"
+CLI_CONFIG_FILE="${CLI_CONFIG_DIR}/panel-cli.env"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -78,6 +81,21 @@ named_asset_url() {
   local wanted_name="$1"
   load_release_json
   printf '%s' "$release_json" | grep '"browser_download_url"' | grep "${wanted_name}" | head -n1 | sed -E 's/.*"([^"]+)".*/\1/'
+}
+
+download_cli_script() {
+  local target_path="$1"
+  local ref=""
+  local url=""
+
+  for ref in "$(release_tag)" main; do
+    url="https://raw.githubusercontent.com/${REPO}/${ref}/install/mei.sh"
+    if curl -fsSL "$url" -o "$target_path"; then
+      return 0
+    fi
+  done
+
+  return 1
 }
 
 backend_download_url="$(asset_url)"
@@ -161,6 +179,20 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
+if ! download_cli_script "$tmp_dir/mei"; then
+  echo "failed to download mei CLI installer helper" >&2
+  exit 1
+fi
+
+sudo mkdir -p "$CLI_CONFIG_DIR"
+sudo tee "$CLI_CONFIG_FILE" >/dev/null <<EOF
+INSTALL_DIR=${INSTALL_DIR}
+SERVICE_NAME=${SERVICE_NAME}
+ENV_FILE=${env_file}
+CLI_PATH=${CLI_PATH}
+EOF
+sudo install -m 0755 "$tmp_dir/mei" "$CLI_PATH"
+
 sudo systemctl daemon-reload
 sudo systemctl enable --now "${SERVICE_NAME}.service"
 
@@ -170,3 +202,4 @@ echo "service: ${SERVICE_NAME}"
 echo "env: ${env_file}"
 echo "status: sudo systemctl status ${SERVICE_NAME} --no-pager"
 echo "panel url: ${backend_public_url}"
+echo "cli: ${CLI_PATH} uninstall"
