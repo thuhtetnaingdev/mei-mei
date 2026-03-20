@@ -27,9 +27,6 @@ const emptyBootstrapForm = {
   publicHost: "",
   sshPort: "22",
   nodePort: "9090",
-  vlessPort: "443",
-  tuicPort: "8443",
-  hysteria2Port: "9443",
   singboxReloadCommand: "systemctl restart meimei-sing-box.service"
 };
 
@@ -119,10 +116,7 @@ export function NodesPage() {
       const response = await api.post<BootstrapResult>("/nodes/bootstrap", {
         ...form,
         sshPort: Number(form.sshPort),
-        nodePort: Number(form.nodePort),
-        vlessPort: Number(form.vlessPort),
-        tuicPort: Number(form.tuicPort),
-        hysteria2Port: Number(form.hysteria2Port)
+        nodePort: Number(form.nodePort)
       });
       setBootstrapJobId(response.data.id);
       setBootstrapLog(response.data.steps);
@@ -279,9 +273,6 @@ export function NodesPage() {
     { key: "publicHost", label: "Public Host", placeholder: "Optional public host, defaults to IP", type: "text" },
     { key: "sshPort", label: "SSH Port", placeholder: "22", type: "number" },
     { key: "nodePort", label: "Node API Port", placeholder: "9090", type: "number" },
-    { key: "vlessPort", label: "VLESS Port", placeholder: "443", type: "number" },
-    { key: "tuicPort", label: "TUIC Port", placeholder: "8443", type: "number" },
-    { key: "hysteria2Port", label: "Hysteria2 Port", placeholder: "9443", type: "number" },
     { key: "singboxReloadCommand", label: "Reload Command", placeholder: "systemctl restart meimei-sing-box.service", type: "text" }
   ] as const;
 
@@ -630,14 +621,10 @@ export function NodesPage() {
                         </div>
                       </div>
 
-                      <dl className="grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-6">
+                      <dl className="grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-5">
                         <div className="rounded-[20px] border border-white/10 bg-slate-950/28 px-3 py-3">
                           <dt className="metric-kicker">API</dt>
                           <dd className="mt-2 break-all text-slate-200">{node.baseUrl}</dd>
-                        </div>
-                        <div className="rounded-[20px] border border-white/10 bg-slate-950/28 px-3 py-3">
-                          <dt className="metric-kicker">Ports</dt>
-                          <dd className="mt-2 text-slate-200">V {node.vlessPort} · T {node.tuicPort} · H {node.hysteria2Port}</dd>
                         </div>
                         <div className="rounded-[20px] border border-white/10 bg-slate-950/28 px-3 py-3">
                           <dt className="metric-kicker">Usage</dt>
@@ -668,7 +655,7 @@ export function NodesPage() {
       <ConfirmDialog
         open={createNodeDialogOpen}
         title="Provision New Node"
-        description="Enter VPS credentials and transport ports. The panel will upload the node backend, install services, and register the node automatically."
+        description="Enter VPS access and node API details. Transport ports are assigned automatically by the backend whenever the node regenerates its inbounds."
         hideActions
         panelClassName="max-w-6xl"
         onCancel={() => setCreateNodeDialogOpen(false)}

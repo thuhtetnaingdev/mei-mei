@@ -13,10 +13,10 @@ import (
 
 // BandwidthSample represents a point-in-time bandwidth measurement
 type BandwidthSample struct {
-	Timestamp   time.Time
-	TotalBytes  int64
-	RXBytes     int64
-	TXBytes     int64
+	Timestamp  time.Time
+	TotalBytes int64
+	RXBytes    int64
+	TXBytes    int64
 }
 
 // UserBandwidthUsage tracks bandwidth usage for a specific user
@@ -29,11 +29,11 @@ type UserBandwidthUsage struct {
 
 // BandwidthTracker monitors and tracks bandwidth usage per user
 type BandwidthTracker struct {
-	mu                sync.RWMutex
-	lastSample        BandwidthSample
+	mu                 sync.RWMutex
+	lastSample         BandwidthSample
 	currentPeriodUsage map[string]*UserBandwidthUsage
-	activeUsers       map[string]bool // Set of active user UUIDs
-	connectionCounts  map[string]int  // UUID -> connection count
+	activeUsers        map[string]bool // Set of active user UUIDs
+	connectionCounts   map[string]int  // UUID -> connection count
 }
 
 // NewBandwidthTracker creates a new bandwidth tracker
@@ -146,12 +146,12 @@ func (t *BandwidthTracker) SampleBandwidth() (BandwidthSample, error) {
 }
 
 // UpdateConnectionCounts updates the connection count per user by parsing sing-box connections
-func (t *BandwidthTracker) UpdateConnectionCounts(vlessPort, tuicPort, hy2Port int) {
+func (t *BandwidthTracker) UpdateConnectionCounts(ports ...int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	// Get connection counts from sing-box ports
-	connCounts := getConnectionCountsByPort(vlessPort, tuicPort, hy2Port)
+	connCounts := getConnectionCountsByPort(ports...)
 
 	// Update connection counts
 	t.connectionCounts = connCounts

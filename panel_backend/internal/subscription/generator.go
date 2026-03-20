@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"panel_backend/internal/models"
+	"panel_backend/internal/services"
 	"strings"
 )
 
@@ -36,9 +37,9 @@ func filterAvailableNodes(nodes []models.Node) []models.Node {
 	return available
 }
 
-func Generate(user models.User, nodes []models.Node) string {
+func Generate(user models.User, nodes []models.Node, settings services.ProtocolSettings) string {
 	availableNodes := filterAvailableNodes(nodes)
-	links := GenerateNodeLinks(user, availableNodes)
+	links := GenerateNodeLinks(user, availableNodes, settings)
 	lines := make([]string, 0, len(links))
 	for _, link := range links {
 		lines = append(lines, link.URL)
@@ -46,35 +47,36 @@ func Generate(user models.User, nodes []models.Node) string {
 	return base64.StdEncoding.EncodeToString([]byte(strings.Join(lines, "\n")))
 }
 
-func GenerateNodeLinks(user models.User, nodes []models.Node) []NodeLink {
+func GenerateNodeLinks(user models.User, nodes []models.Node, settings services.ProtocolSettings) []NodeLink {
 	availableNodes := filterAvailableNodes(nodes)
 	var links []NodeLink
 
 	for _, node := range availableNodes {
-		if node.VLESSPort > 0 {
+		plan := buildNodeTransportPlan(node, settings)
+		for _, variant := range plan.Reality {
 			vlessQuery := url.Values{}
 			vlessQuery.Set("type", "tcp")
 			vlessQuery.Set("encryption", "none")
 			if node.RealityPublicKey != "" {
 				vlessQuery.Set("security", "reality")
 				vlessQuery.Set("flow", "xtls-rprx-vision")
-				vlessQuery.Set("sni", valueOrDefault(node.RealityServerName, "www.cloudflare.com"))
+				vlessQuery.Set("sni", variant.ServerName)
 				vlessQuery.Set("pbk", node.RealityPublicKey)
 				vlessQuery.Set("sid", node.RealityShortID)
-				vlessQuery.Set("fp", "chrome")
+				vlessQuery.Set("fp", randomizedUTLSFingerprint)
 			}
 			link := fmt.Sprintf(
 				"vless://%s@%s:%d?%s#%s-VLESS",
 				user.UUID,
 				node.PublicHost,
-				node.VLESSPort,
+				variant.Port,
 				vlessQuery.Encode(),
-				url.QueryEscape(node.Name),
+				url.QueryEscape(node.Name+"-"+variant.LabelSuffix),
 			)
 			links = append(links, NodeLink{NodeName: node.Name, Protocol: "vless", URL: link})
 		}
 
-		if node.TUICPort > 0 {
+		if plan.TUIC.Port > 0 {
 			tuicQuery := url.Values{}
 			tuicQuery.Set("congestion_control", "bbr")
 			tuicQuery.Set("sni", node.PublicHost)
@@ -84,24 +86,28 @@ func GenerateNodeLinks(user models.User, nodes []models.Node) []NodeLink {
 				user.UUID,
 				user.UUID,
 				node.PublicHost,
-				node.TUICPort,
+				plan.TUIC.Port,
 				tuicQuery.Encode(),
 				url.QueryEscape(node.Name),
 			)
 			links = append(links, NodeLink{NodeName: node.Name, Protocol: "tuic", URL: link})
 		}
 
-		if node.Hysteria2Port > 0 {
+		for _, variant := range plan.Hysteria2 {
 			hy2Query := url.Values{}
 			hy2Query.Set("sni", node.PublicHost)
 			hy2Query.Set("insecure", "1")
+			if variant.ObfsPassword != "" {
+				hy2Query.Set("obfs", "salamander")
+				hy2Query.Set("obfs-password", variant.ObfsPassword)
+			}
 			link := fmt.Sprintf(
 				"hysteria2://%s@%s:%d?%s#%s-HY2",
 				user.UUID,
 				node.PublicHost,
-				node.Hysteria2Port,
+				variant.Port,
 				hy2Query.Encode(),
-				url.QueryEscape(node.Name),
+				url.QueryEscape(node.Name+"-"+variant.LabelSuffix),
 			)
 			links = append(links, NodeLink{NodeName: node.Name, Protocol: "hysteria2", URL: link})
 		}

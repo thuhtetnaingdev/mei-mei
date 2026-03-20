@@ -1,11 +1,11 @@
 package services
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 
@@ -78,13 +78,54 @@ func (s *UninstallService) buildScript(installDir string) string {
 		"fi",
 		"if command -v ufw >/dev/null 2>&1; then",
 		"  ufw --force delete allow " + shellQuote(s.cfg.Port+"/tcp") + " >/dev/null 2>&1 || true",
-		"  ufw --force delete allow " + shellQuote(strconv.Itoa(s.cfg.VLESSPort)+"/tcp") + " >/dev/null 2>&1 || true",
-		"  ufw --force delete allow " + shellQuote(strconv.Itoa(s.cfg.TUICPort)+"/udp") + " >/dev/null 2>&1 || true",
-		"  ufw --force delete allow " + shellQuote(strconv.Itoa(s.cfg.Hysteria2Port)+"/udp") + " >/dev/null 2>&1 || true",
+		s.firewallCleanupCommands(),
 		"fi",
 		"rm -f " + shellQuote(s.cfg.SingboxConfigPath) + " " + shellQuote(s.cfg.TLSCertificatePath) + " " + shellQuote(s.cfg.TLSKeyPath),
 		"rm -f " + shellQuote(s.cfg.NodeBinaryPath) + " " + shellQuote(s.cfg.NodeBinaryPath+".backup") + " " + shellQuote(s.cfg.NodeBinaryPath+".incoming") + " " + shellQuote(s.cfg.NodeBinaryPath+".reinstall-status.json"),
 		"rm -f " + shellQuote(filepath.Join(installDir, ".env")) + " " + shellQuote(filepath.Join(installDir, ".env.example")),
 		"rm -rf " + shellQuote(installDir),
 	}, "\n")
+}
+
+func (s *UninstallService) firewallCleanupCommands() string {
+	payload, err := os.ReadFile(s.cfg.SingboxConfigPath)
+	if err != nil {
+		return "  true"
+	}
+
+	var parsed struct {
+		Inbounds []struct {
+			Type       string `json:"type"`
+			ListenPort int    `json:"listen_port"`
+		} `json:"inbounds"`
+	}
+	if err := json.Unmarshal(payload, &parsed); err != nil {
+		return "  true"
+	}
+
+	commands := make([]string, 0, len(parsed.Inbounds))
+	seen := make(map[string]struct{}, len(parsed.Inbounds))
+	for _, inbound := range parsed.Inbounds {
+		if inbound.ListenPort <= 0 {
+			continue
+		}
+
+		protocol := "tcp"
+		if inbound.Type == "tuic" || inbound.Type == "hysteria2" {
+			protocol = "udp"
+		}
+
+		rule := fmt.Sprintf("%d/%s", inbound.ListenPort, protocol)
+		if _, exists := seen[rule]; exists {
+			continue
+		}
+		seen[rule] = struct{}{}
+		commands = append(commands, "  ufw --force delete allow "+shellQuote(rule)+" >/dev/null 2>&1 || true")
+	}
+
+	if len(commands) == 0 {
+		return "  true"
+	}
+
+	return strings.Join(commands, "\n")
 }

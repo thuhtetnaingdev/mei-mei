@@ -84,8 +84,10 @@ type SyncUser struct {
 }
 
 type SyncPayloadWithLimits struct {
-	NodeName string     `json:"nodeName"`
-	Users    []SyncUser `json:"users"`
+	NodeName             string     `json:"nodeName"`
+	RealitySNIs          []string   `json:"realitySnis"`
+	Hysteria2Masquerades []string   `json:"hysteria2Masquerades"`
+	Users                []SyncUser `json:"users"`
 }
 
 type BootstrapJob struct {
@@ -161,9 +163,6 @@ func (s *NodeService) StartBootstrap(input BootstrapNodeInput) *BootstrapJob {
 			PublicHost:           input.PublicHost,
 			SSHPort:              input.SSHPort,
 			NodePort:             input.NodePort,
-			VLESSPort:            input.VLESSPort,
-			TUICPort:             input.TUICPort,
-			Hysteria2Port:        input.Hysteria2Port,
 			SingboxReloadCommand: input.SingboxReloadCommand,
 		},
 	}
@@ -538,9 +537,16 @@ func (s *NodeService) syncNode(node models.Node, users []models.User) error {
 		})
 	}
 
+	protocolSettings, err := loadProtocolSettings(s.db)
+	if err != nil {
+		return err
+	}
+
 	payload := SyncPayloadWithLimits{
-		NodeName: node.Name,
-		Users:    syncUsers,
+		NodeName:             node.Name,
+		RealitySNIs:          protocolSettings.RealitySNIs,
+		Hysteria2Masquerades: protocolSettings.Hysteria2Masquerades,
+		Users:                syncUsers,
 	}
 
 	body, err := json.Marshal(payload)

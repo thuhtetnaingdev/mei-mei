@@ -39,9 +39,6 @@ type BootstrapNodeInput struct {
 	PublicHost           string `json:"publicHost"`
 	SSHPort              int    `json:"sshPort"`
 	NodePort             int    `json:"nodePort"`
-	VLESSPort            int    `json:"vlessPort"`
-	TUICPort             int    `json:"tuicPort"`
-	Hysteria2Port        int    `json:"hysteria2Port"`
 	SingboxReloadCommand string `json:"singboxReloadCommand"`
 }
 
@@ -169,15 +166,6 @@ func normalizeBootstrapInput(input *BootstrapNodeInput) {
 	if input.NodePort == 0 {
 		input.NodePort = 9090
 	}
-	if input.VLESSPort == 0 {
-		input.VLESSPort = 443
-	}
-	if input.TUICPort == 0 {
-		input.TUICPort = 8443
-	}
-	if input.Hysteria2Port == 0 {
-		input.Hysteria2Port = 9443
-	}
 	if input.PublicHost == "" {
 		input.PublicHost = input.IP
 	}
@@ -288,9 +276,9 @@ func (s *NodeService) upsertBootstrapNodeRecord(input BootstrapNodeInput, artifa
 		SSHPrivateKey:     artifact.sshPrivateKeyPEM,
 		SSHPublicKey:      artifact.sshPublicKey,
 		PublicHost:        input.PublicHost,
-		VLESSPort:         input.VLESSPort,
-		TUICPort:          input.TUICPort,
-		Hysteria2Port:     input.Hysteria2Port,
+		VLESSPort:         0,
+		TUICPort:          0,
+		Hysteria2Port:     0,
 		RealityPublicKey:  artifact.realityPublicKey,
 		RealityShortID:    artifact.realityShortID,
 		RealityServerName: artifact.realityServerName,
@@ -318,9 +306,6 @@ func buildNodeInstallCommand(node models.Node, sharedToken string) string {
 		"MEIMEI_PUBLIC_HOST=" + shellQuote(node.PublicHost),
 		"MEIMEI_NODE_TOKEN=" + shellQuote(node.ProtocolToken),
 		"MEIMEI_CONTROL_PLANE_TOKEN=" + shellQuote(sharedToken),
-		"MEIMEI_VLESS_PORT=" + shellQuote(strconv.Itoa(node.VLESSPort)),
-		"MEIMEI_TUIC_PORT=" + shellQuote(strconv.Itoa(node.TUICPort)),
-		"MEIMEI_HYSTERIA2_PORT=" + shellQuote(strconv.Itoa(node.Hysteria2Port)),
 	}
 
 	return strings.Join(append(env, "bash <(curl -fsSL "+shellQuote(scriptURL)+")"), " ")
@@ -331,7 +316,7 @@ func buildNodeUninstallCommand(node models.Node) string {
 
 	return strings.Join([]string{
 		"if command -v systemctl >/dev/null 2>&1; then systemctl disable --now meimei-node.service >/dev/null 2>&1 || true; systemctl disable --now meimei-sing-box.service >/dev/null 2>&1 || true; rm -f /etc/systemd/system/meimei-node.service /etc/systemd/system/meimei-sing-box.service; systemctl daemon-reload >/dev/null 2>&1 || true; systemctl reset-failed >/dev/null 2>&1 || true; fi",
-		fmt.Sprintf("if command -v ufw >/dev/null 2>&1; then ufw --force delete allow %d/tcp >/dev/null 2>&1 || true; ufw --force delete allow %d/tcp >/dev/null 2>&1 || true; ufw --force delete allow %d/udp >/dev/null 2>&1 || true; ufw --force delete allow %d/udp >/dev/null 2>&1 || true; fi", extractNodePort(node.BaseURL), node.VLESSPort, node.TUICPort, node.Hysteria2Port),
+		fmt.Sprintf("if command -v ufw >/dev/null 2>&1; then ufw --force delete allow %d/tcp >/dev/null 2>&1 || true; fi", extractNodePort(node.BaseURL)),
 		"rm -rf " + installDir,
 	}, "; ")
 }

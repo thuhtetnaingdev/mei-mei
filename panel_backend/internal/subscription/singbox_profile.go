@@ -2,14 +2,14 @@ package subscription
 
 import (
 	"encoding/json"
-	"fmt"
 	"panel_backend/internal/models"
+	"panel_backend/internal/services"
 )
 
-func GenerateSingboxProfile(user models.User, nodes []models.Node) ([]byte, error) {
+func GenerateSingboxProfile(user models.User, nodes []models.Node, settings services.ProtocolSettings) ([]byte, error) {
 	availableNodes := filterAvailableNodes(nodes)
-	proxyOutbounds := collectOutboundTags(availableNodes)
-	urltestOutbounds := collectOutboundTags(availableNodes)
+	proxyOutbounds := collectOutboundTags(availableNodes, settings)
+	urltestOutbounds := collectOutboundTags(availableNodes, settings)
 
 	outbounds := []map[string]interface{}{
 		{
@@ -32,26 +32,23 @@ func GenerateSingboxProfile(user models.User, nodes []models.Node) ([]byte, erro
 	}
 
 	for _, node := range availableNodes {
-		if node.VLESSPort > 0 {
-			serverName := node.RealityServerName
-			if serverName == "" {
-				serverName = node.PublicHost
-			}
+		plan := buildNodeTransportPlan(node, settings)
+		for _, variant := range plan.Reality {
 			outbounds = append(outbounds, map[string]interface{}{
 				"type":        "vless",
-				"tag":         fmt.Sprintf("%s-vless", node.Name),
+				"tag":         variant.Tag,
 				"server":      node.PublicHost,
-				"server_port": node.VLESSPort,
+				"server_port": variant.Port,
 				"uuid":        user.UUID,
 				"flow":        "xtls-rprx-vision",
 				"network":     "tcp",
 				"tls": map[string]interface{}{
 					"enabled":     true,
 					"insecure":    true,
-					"server_name": serverName,
+					"server_name": variant.ServerName,
 					"utls": map[string]interface{}{
 						"enabled":     true,
-						"fingerprint": "chrome",
+						"fingerprint": randomizedUTLSFingerprint,
 					},
 					"reality": map[string]interface{}{
 						"enabled":    node.RealityPublicKey != "",
@@ -62,12 +59,12 @@ func GenerateSingboxProfile(user models.User, nodes []models.Node) ([]byte, erro
 				"transport": map[string]interface{}{},
 			})
 		}
-		if node.TUICPort > 0 {
+		if plan.TUIC.Port > 0 {
 			outbounds = append(outbounds, map[string]interface{}{
 				"type":               "tuic",
-				"tag":                fmt.Sprintf("%s-tuic", node.Name),
+				"tag":                plan.TUIC.Tag,
 				"server":             node.PublicHost,
-				"server_port":        node.TUICPort,
+				"server_port":        plan.TUIC.Port,
 				"uuid":               user.UUID,
 				"password":           user.UUID,
 				"congestion_control": "bbr",
@@ -78,18 +75,33 @@ func GenerateSingboxProfile(user models.User, nodes []models.Node) ([]byte, erro
 				},
 			})
 		}
-		if node.Hysteria2Port > 0 {
-			outbounds = append(outbounds, map[string]interface{}{
+		for _, variant := range plan.Hysteria2 {
+			outbound := map[string]interface{}{
 				"type":        "hysteria2",
-				"tag":         fmt.Sprintf("%s-hy2", node.Name),
+				"tag":         variant.Tag,
 				"server":      node.PublicHost,
-				"server_port": node.Hysteria2Port,
+				"server_port": variant.Port,
 				"password":    user.UUID,
 				"tls": map[string]interface{}{
 					"enabled":     true,
 					"insecure":    true,
 					"server_name": node.PublicHost,
 				},
+			}
+			if variant.ObfsPassword != "" {
+				outbound["obfs"] = map[string]interface{}{
+					"type":     "salamander",
+					"password": variant.ObfsPassword,
+				}
+			}
+			outbounds = append(outbounds, map[string]interface{}{
+				"type":        outbound["type"],
+				"tag":         outbound["tag"],
+				"server":      outbound["server"],
+				"server_port": outbound["server_port"],
+				"password":    outbound["password"],
+				"tls":         outbound["tls"],
+				"obfs":        outbound["obfs"],
 			})
 		}
 
@@ -140,17 +152,18 @@ func GenerateSingboxProfile(user models.User, nodes []models.Node) ([]byte, erro
 	return json.MarshalIndent(config, "", "  ")
 }
 
-func collectOutboundTags(nodes []models.Node) []string {
+func collectOutboundTags(nodes []models.Node, settings services.ProtocolSettings) []string {
 	tags := []string{}
 	for _, node := range nodes {
-		if node.VLESSPort > 0 {
-			tags = append(tags, fmt.Sprintf("%s-vless", node.Name))
+		plan := buildNodeTransportPlan(node, settings)
+		for _, variant := range plan.Reality {
+			tags = append(tags, variant.Tag)
 		}
-		if node.TUICPort > 0 {
-			tags = append(tags, fmt.Sprintf("%s-tuic", node.Name))
+		if plan.TUIC.Port > 0 {
+			tags = append(tags, plan.TUIC.Tag)
 		}
-		if node.Hysteria2Port > 0 {
-			tags = append(tags, fmt.Sprintf("%s-hy2", node.Name))
+		for _, variant := range plan.Hysteria2 {
+			tags = append(tags, variant.Tag)
 		}
 	}
 	if len(tags) == 0 {

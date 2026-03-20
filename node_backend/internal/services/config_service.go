@@ -3,9 +3,12 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,8 +17,10 @@ import (
 )
 
 type ApplyConfigRequest struct {
-	NodeName string `json:"nodeName"`
-	Users    []struct {
+	NodeName             string   `json:"nodeName"`
+	RealitySNIs          []string `json:"realitySnis"`
+	Hysteria2Masquerades []string `json:"hysteria2Masquerades"`
+	Users                []struct {
 		UUID             string `json:"uuid"`
 		Email            string `json:"email"`
 		Enabled          bool   `json:"enabled"`
@@ -24,12 +29,13 @@ type ApplyConfigRequest struct {
 }
 
 type ConfigService struct {
-	cfg                config.Config
-	mu                 sync.RWMutex
-	lastReload         time.Time
-	lastError          string
-	activeUsers        int
-	bandwidthTracker   *BandwidthTracker
+	cfg               config.Config
+	mu                sync.RWMutex
+	lastReload        time.Time
+	lastError         string
+	activeUsers       int
+	activeListenPorts []int
+	bandwidthTracker  *BandwidthTracker
 }
 
 func NewConfigService(cfg config.Config) *ConfigService {
@@ -81,9 +87,6 @@ func (s *ConfigService) Apply(req ApplyConfigRequest) error {
 	payload, err := singbox.Generate(
 		s.cfg.NodeName,
 		s.cfg.PublicHost,
-		s.cfg.VLESSPort,
-		s.cfg.TUICPort,
-		s.cfg.Hysteria2Port,
 		s.cfg.VLESSRealityPrivateKey,
 		s.cfg.VLESSRealityServerName,
 		s.cfg.VLESSRealityShortID,
@@ -92,6 +95,8 @@ func (s *ConfigService) Apply(req ApplyConfigRequest) error {
 		s.cfg.TLSCertificatePath,
 		s.cfg.TLSKeyPath,
 		s.cfg.TLSServerName,
+		req.RealitySNIs,
+		req.Hysteria2Masquerades,
 		users,
 	)
 	if err != nil {
@@ -104,15 +109,32 @@ func (s *ConfigService) Apply(req ApplyConfigRequest) error {
 		return err
 	}
 
+	if err := s.ensureFirewallPorts(req); err != nil {
+		log.Printf("[config-service] firewall sync warning: %v", err)
+	}
+
 	if err := s.reload(); err != nil {
 		s.setError(err.Error())
 		return err
+	}
+
+	layout := singbox.BuildTransportLayout(s.cfg.NodeName, s.cfg.PublicHost, req.RealitySNIs, req.Hysteria2Masquerades)
+	activePorts := make([]int, 0, len(layout.VLESS)+len(layout.Hysteria2)+1)
+	for _, plan := range layout.VLESS {
+		activePorts = append(activePorts, plan.Port)
+	}
+	if layout.TUIC.Port > 0 {
+		activePorts = append(activePorts, layout.TUIC.Port)
+	}
+	for _, plan := range layout.Hysteria2 {
+		activePorts = append(activePorts, plan.Port)
 	}
 
 	s.mu.Lock()
 	s.lastReload = time.Now()
 	s.lastError = ""
 	s.activeUsers = countEnabledUsers(req.Users)
+	s.activeListenPorts = activePorts
 	s.mu.Unlock()
 
 	// Update bandwidth tracker with active users
@@ -131,9 +153,6 @@ func (s *ConfigService) Status() map[string]interface{} {
 	return map[string]interface{}{
 		"nodeName":           s.cfg.NodeName,
 		"publicHost":         s.cfg.PublicHost,
-		"vlessPort":          s.cfg.VLESSPort,
-		"tuicPort":           s.cfg.TUICPort,
-		"hysteria2Port":      s.cfg.Hysteria2Port,
 		"configPath":         s.cfg.SingboxConfigPath,
 		"lastReload":         s.lastReload,
 		"lastError":          s.lastError,
@@ -161,7 +180,10 @@ func (s *ConfigService) StartBandwidthMonitoring(ctx context.Context, interval t
 				log.Printf("[bandwidth-monitor] stopped")
 				return
 			case <-ticker.C:
-				tracker.UpdateConnectionCounts(s.cfg.VLESSPort, s.cfg.TUICPort, s.cfg.Hysteria2Port)
+				s.mu.RLock()
+				ports := append([]int(nil), s.activeListenPorts...)
+				s.mu.RUnlock()
+				tracker.UpdateConnectionCounts(ports...)
 				delta, duration, err := tracker.CollectUsage()
 				if err != nil {
 					log.Printf("[bandwidth-monitor] sample failed: %v", err)
@@ -178,6 +200,29 @@ func (s *ConfigService) StartBandwidthMonitoring(ctx context.Context, interval t
 func (s *ConfigService) reload() error {
 	cmd := exec.Command("sh", "-c", s.cfg.SingboxReloadCommand)
 	return cmd.Run()
+}
+
+func (s *ConfigService) ensureFirewallPorts(req ApplyConfigRequest) error {
+	if _, err := exec.LookPath("ufw"); err != nil {
+		return nil
+	}
+
+	ports := make([]string, 0, 4)
+	layout := singbox.BuildTransportLayout(s.cfg.NodeName, s.cfg.PublicHost, req.RealitySNIs, req.Hysteria2Masquerades)
+	ports = appendPorts(ports, "tcp", layout.VLESS)
+	if layout.TUIC.Port > 0 {
+		ports = append(ports, fmt.Sprintf("%d/udp", layout.TUIC.Port))
+	}
+	ports = appendHy2Ports(ports, layout.Hysteria2)
+
+	for _, port := range ports {
+		cmd := exec.Command("ufw", "allow", port)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("ufw allow %s failed: %v (%s)", port, err, strings.TrimSpace(string(output)))
+		}
+	}
+
+	return nil
 }
 
 func (s *ConfigService) setError(message string) {
@@ -199,6 +244,20 @@ func countEnabledUsers(users []struct {
 		}
 	}
 	return total
+}
+
+func appendPorts[T interface{ GetPort() int }](ports []string, protocol string, plans []T) []string {
+	for _, plan := range plans {
+		ports = append(ports, strconv.Itoa(plan.GetPort())+"/"+protocol)
+	}
+	return ports
+}
+
+func appendHy2Ports(ports []string, plans []singbox.Hysteria2InboundPlan) []string {
+	for _, plan := range plans {
+		ports = append(ports, strconv.Itoa(plan.GetPort())+"/udp")
+	}
+	return ports
 }
 
 func (s *ConfigService) restoreTrackedUsersFromConfig() {

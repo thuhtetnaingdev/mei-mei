@@ -116,6 +116,8 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 		protected.PUT("/admin/credentials", handler.updateAdminCredentials)
 		protected.GET("/settings/distribution", handler.getDistributionSettings)
 		protected.PUT("/settings/distribution", handler.updateDistributionSettings)
+		protected.GET("/settings/protocols", handler.getProtocolSettings)
+		protected.PUT("/settings/protocols", handler.updateProtocolSettings)
 		protected.GET("/mint-pool", handler.getMintPool)
 		protected.POST("/mint-pool/mint", handler.mintPool)
 		protected.DELETE("/mint-pool", handler.resetMintPool)
@@ -274,6 +276,70 @@ func (h *Handler) updateDistributionSettings(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, settings)
+}
+
+func (h *Handler) getProtocolSettings(c *gin.Context) {
+	settings, err := h.adminService.GetProtocolSettings()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, settings)
+}
+
+func (h *Handler) updateProtocolSettings(c *gin.Context) {
+	var input services.ProtocolSettings
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	settings, err := h.adminService.UpdateProtocolSettings(input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	response := services.ProtocolSettingsUpdateResponse{
+		RealitySNIs:          settings.RealitySNIs,
+		Hysteria2Masquerades: settings.Hysteria2Masquerades,
+	}
+
+	activeUsers, err := h.userService.ActiveUsers()
+	if err != nil {
+		response.SyncError = "settings saved, but loading active users for sync failed: " + err.Error()
+		c.JSON(http.StatusOK, response)
+		return
+	}
+
+	results, err := h.nodeService.SyncAllUsers(activeUsers)
+	if err != nil {
+		response.SyncError = "settings saved, but node sync failed: " + err.Error()
+		c.JSON(http.StatusOK, response)
+		return
+	}
+
+	failures := make([]string, 0)
+	for _, result := range results {
+		status, _ := result["status"].(string)
+		if status == "success" {
+			response.SyncedNodes++
+			continue
+		}
+
+		nodeName, _ := result["node"].(string)
+		errorMessage, _ := result["error"].(string)
+		if errorMessage == "" {
+			errorMessage = "sync failed"
+		}
+		failures = append(failures, strings.TrimSpace(nodeName+": "+errorMessage))
+	}
+	if len(failures) > 0 {
+		response.SyncError = "settings saved, but some nodes failed to sync: " + strings.Join(failures, "; ")
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *Handler) createUser(c *gin.Context) {
@@ -658,12 +724,17 @@ func (h *Handler) getSubscription(c *gin.Context) {
 
 	remoteProfileURL := h.cfg.BasePublicURL + "/profiles/singbox/" + user.UUID
 	importURL := "sing-box://import-remote-profile?url=" + url.QueryEscape(remoteProfileURL) + "&name=" + url.QueryEscape(user.Email)
+	protocolSettings, err := h.adminService.GetProtocolSettings()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"userId":           user.ID,
 		"uuid":             user.UUID,
-		"subscription":     subscription.Generate(*user, nodes),
-		"nodeLinks":        subscription.GenerateNodeLinks(*user, nodes),
+		"subscription":     subscription.Generate(*user, nodes, protocolSettings),
+		"nodeLinks":        subscription.GenerateNodeLinks(*user, nodes, protocolSettings),
 		"url":              h.cfg.BaseSubscriptionURL + "/" + c.Param("userId"),
 		"remoteProfileUrl": remoteProfileURL,
 		"singboxImportUrl": importURL,
@@ -683,7 +754,13 @@ func (h *Handler) getSingboxProfile(c *gin.Context) {
 		return
 	}
 
-	profile, err := subscription.GenerateSingboxProfile(*user, nodes)
+	protocolSettings, err := h.adminService.GetProtocolSettings()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	profile, err := subscription.GenerateSingboxProfile(*user, nodes, protocolSettings)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

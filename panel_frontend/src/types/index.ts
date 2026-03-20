@@ -66,9 +66,6 @@ export interface Node {
   enabled: boolean;
   location: string;
   publicHost: string;
-  vlessPort: number;
-  tuicPort: number;
-  hysteria2Port: number;
   expiresAt?: string | null;
   bandwidthLimitGb: number;
   bandwidthUsedBytes: number;
@@ -144,6 +141,16 @@ export interface DistributionSettings {
   adminPercent: number;
   usagePoolPercent: number;
   reservePoolPercent: number;
+}
+
+export interface ProtocolSettings {
+  realitySnis: string[];
+  hysteria2Masquerades: string[];
+}
+
+export interface ProtocolSettingsUpdateResponse extends ProtocolSettings {
+  syncedNodes: number;
+  syncError?: string;
 }
 
 export interface MintPoolEvent {

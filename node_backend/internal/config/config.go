@@ -18,9 +18,6 @@ type Config struct {
 	NodeBinaryPath              string
 	NodeRestartCommand          string
 	PublicHost                  string
-	VLESSPort                   int
-	TUICPort                    int
-	Hysteria2Port               int
 	VLESSRealityPrivateKey      string
 	VLESSRealityPublicKey       string
 	VLESSRealityShortID         string
@@ -45,9 +42,6 @@ func Load() Config {
 		NodeBinaryPath:              getEnv("NODE_BINARY_PATH", "/opt/meimei-node/node_backend"),
 		NodeRestartCommand:          getEnv("NODE_RESTART_COMMAND", "systemctl restart meimei-node"),
 		PublicHost:                  getEnv("PUBLIC_HOST", "node.example.com"),
-		VLESSPort:                   getEnvAsInt("VLESS_PORT", 443),
-		TUICPort:                    getEnvAsInt("TUIC_PORT", 8443),
-		Hysteria2Port:               getEnvAsInt("HYSTERIA2_PORT", 9443),
 		VLESSRealityPrivateKey:      getEnv("VLESS_REALITY_PRIVATE_KEY", ""),
 		VLESSRealityPublicKey:       getEnv("VLESS_REALITY_PUBLIC_KEY", ""),
 		VLESSRealityShortID:         getEnv("VLESS_REALITY_SHORT_ID", ""),

@@ -16,7 +16,7 @@ type Config struct {
 	Route     map[string]interface{}   `json:"route"`
 }
 
-func Generate(nodeName, publicHost string, vlessPort, tuicPort, hy2Port int, realityPrivateKey, realityServerName, realityShortID, handshakeServer string, handshakePort int, tlsCertPath, tlsKeyPath, tlsServerName string, users []User) ([]byte, error) {
+func Generate(nodeName, publicHost string, realityPrivateKey, realityServerName, realityShortID, handshakeServer string, handshakePort int, tlsCertPath, tlsKeyPath, tlsServerName string, realitySNIs, hysteria2Masquerades []string, users []User) ([]byte, error) {
 	vlessClients := make([]map[string]interface{}, 0, len(users))
 	tuicClients := make([]map[string]interface{}, 0, len(users))
 	hy2Clients := make([]map[string]interface{}, 0, len(users))
@@ -40,16 +40,19 @@ func Generate(nodeName, publicHost string, vlessPort, tuicPort, hy2Port int, rea
 		})
 	}
 
-	inbounds := []map[string]interface{}{
-		{
+	layout := BuildTransportLayout(nodeName, publicHost, realitySNIs, hysteria2Masquerades)
+	inbounds := make([]map[string]interface{}, 0, len(layout.VLESS)+len(layout.Hysteria2)+1)
+
+	for _, plan := range layout.VLESS {
+		inbounds = append(inbounds, map[string]interface{}{
 			"type":        "vless",
-			"tag":         "vless-in",
+			"tag":         plan.Tag,
 			"listen":      "::",
-			"listen_port": vlessPort,
+			"listen_port": plan.Port,
 			"users":       vlessClients,
 			"tls": map[string]interface{}{
 				"enabled":     true,
-				"server_name": realityServerName,
+				"server_name": plan.ServerName,
 				"reality": map[string]interface{}{
 					"enabled": true,
 					"handshake": map[string]interface{}{
@@ -60,12 +63,15 @@ func Generate(nodeName, publicHost string, vlessPort, tuicPort, hy2Port int, rea
 					"short_id":    []string{realityShortID},
 				},
 			},
-		},
-		{
+		})
+	}
+
+	if layout.TUIC.Port > 0 {
+		inbounds = append(inbounds, map[string]interface{}{
 			"type":               "tuic",
-			"tag":                "tuic-in",
+			"tag":                layout.TUIC.Tag,
 			"listen":             "::",
-			"listen_port":        tuicPort,
+			"listen_port":        layout.TUIC.Port,
 			"users":              tuicClients,
 			"congestion_control": "bbr",
 			"tls": map[string]interface{}{
@@ -74,12 +80,15 @@ func Generate(nodeName, publicHost string, vlessPort, tuicPort, hy2Port int, rea
 				"certificate_path": tlsCertPath,
 				"key_path":         tlsKeyPath,
 			},
-		},
-		{
+		})
+	}
+
+	for _, plan := range layout.Hysteria2 {
+		inbound := map[string]interface{}{
 			"type":        "hysteria2",
-			"tag":         "hy2-in",
+			"tag":         plan.Tag,
 			"listen":      "::",
-			"listen_port": hy2Port,
+			"listen_port": plan.Port,
 			"users":       hy2Clients,
 			"tls": map[string]interface{}{
 				"enabled":          true,
@@ -87,7 +96,18 @@ func Generate(nodeName, publicHost string, vlessPort, tuicPort, hy2Port int, rea
 				"certificate_path": tlsCertPath,
 				"key_path":         tlsKeyPath,
 			},
-		},
+		}
+		if plan.MasqueradeURL != "" {
+			inbound["masquerade"] = map[string]interface{}{
+				"type": "proxy",
+				"url":  plan.MasqueradeURL,
+			}
+			inbound["obfs"] = map[string]interface{}{
+				"type":     "salamander",
+				"password": plan.ObfsPassword,
+			}
+		}
+		inbounds = append(inbounds, inbound)
 	}
 
 	cfg := Config{

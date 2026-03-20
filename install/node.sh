@@ -6,9 +6,6 @@ VERSION="${MEIMEI_VERSION:-latest}"
 INSTALL_DIR="${MEIMEI_NODE_DIR:-/opt/meimei-node}"
 NODE_NAME="${MEIMEI_NODE_NAME:-$(hostname)}"
 NODE_PORT="${MEIMEI_NODE_PORT:-9090}"
-VLESS_PORT="${MEIMEI_VLESS_PORT:-443}"
-TUIC_PORT="${MEIMEI_TUIC_PORT:-8443}"
-HYSTERIA2_PORT="${MEIMEI_HYSTERIA2_PORT:-9443}"
 PUBLIC_HOST="${MEIMEI_PUBLIC_HOST:-}"
 NODE_TOKEN="${MEIMEI_NODE_TOKEN:-}"
 CONTROL_PLANE_TOKEN="${MEIMEI_CONTROL_PLANE_TOKEN:-}"
@@ -147,9 +144,6 @@ SINGBOX_RELOAD_COMMAND=systemctl restart meimei-sing-box.service
 NODE_BINARY_PATH=${INSTALL_DIR}/node_backend
 NODE_RESTART_COMMAND=systemctl restart meimei-node.service
 PUBLIC_HOST=${PUBLIC_HOST}
-VLESS_PORT=${VLESS_PORT}
-TUIC_PORT=${TUIC_PORT}
-HYSTERIA2_PORT=${HYSTERIA2_PORT}
 VLESS_REALITY_PRIVATE_KEY=${reality_private_key}
 VLESS_REALITY_PUBLIC_KEY=${reality_public_key}
 VLESS_REALITY_SHORT_ID=${reality_short_id}
@@ -197,9 +191,6 @@ kill_port_processes "$NODE_PORT"
 
 if command -v ufw >/dev/null 2>&1; then
   sudo ufw allow "${NODE_PORT}/tcp" >/dev/null 2>&1 || true
-  sudo ufw allow "${VLESS_PORT}/tcp" >/dev/null 2>&1 || true
-  sudo ufw allow "${TUIC_PORT}/udp" >/dev/null 2>&1 || true
-  sudo ufw allow "${HYSTERIA2_PORT}/udp" >/dev/null 2>&1 || true
 fi
 
 sudo systemctl daemon-reload

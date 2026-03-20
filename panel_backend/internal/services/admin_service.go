@@ -84,6 +84,15 @@ func (s *AdminService) GetDistributionSettings() (DistributionSettings, error) {
 	}, nil
 }
 
+func (s *AdminService) GetProtocolSettings() (ProtocolSettings, error) {
+	admin, err := s.getOrCreateAdminSettings()
+	if err != nil {
+		return ProtocolSettings{}, err
+	}
+
+	return protocolSettingsFromAdmin(admin)
+}
+
 func (s *AdminService) UpdateDistributionSettings(input DistributionSettings) (DistributionSettings, error) {
 	if err := validateDistributionSettings(input); err != nil {
 		return DistributionSettings{}, err
@@ -103,6 +112,23 @@ func (s *AdminService) UpdateDistributionSettings(input DistributionSettings) (D
 	}
 
 	return s.GetDistributionSettings()
+}
+
+func (s *AdminService) UpdateProtocolSettings(input ProtocolSettings) (ProtocolSettings, error) {
+	admin, err := s.getOrCreateAdminSettings()
+	if err != nil {
+		return ProtocolSettings{}, err
+	}
+
+	if err := storeProtocolSettings(admin, input); err != nil {
+		return ProtocolSettings{}, err
+	}
+
+	if err := s.db.Save(admin).Error; err != nil {
+		return ProtocolSettings{}, err
+	}
+
+	return s.GetProtocolSettings()
 }
 
 func (s *AdminService) UpdateCredentials(input UpdateAdminCredentialsInput) (map[string]string, error) {
@@ -157,6 +183,12 @@ func (s *AdminService) getOrCreateAdminSettings() (*models.AdminSetting, error) 
 			admin.ReservePoolPercent = DefaultReservePercent
 			changed = true
 		}
+		if strings.TrimSpace(admin.RealitySNIsJSON) == "" {
+			if err := storeProtocolSettings(admin, defaultProtocolSettings()); err != nil {
+				return nil, err
+			}
+			changed = true
+		}
 		if changed {
 			if err := s.db.Save(admin).Error; err != nil {
 				return nil, err
@@ -173,6 +205,9 @@ func (s *AdminService) getOrCreateAdminSettings() (*models.AdminSetting, error) 
 		AdminPercent:       DefaultAdminPercent,
 		UsagePoolPercent:   DefaultUsagePoolPercent,
 		ReservePoolPercent: DefaultReservePercent,
+	}
+	if err := storeProtocolSettings(admin, defaultProtocolSettings()); err != nil {
+		return nil, err
 	}
 	if err := s.db.Create(admin).Error; err != nil {
 		return nil, err
