@@ -44,6 +44,11 @@ func Generate(nodeName, publicHost string, realityPrivateKey, realityServerName,
 	inbounds := make([]map[string]interface{}, 0, len(layout.VLESS)+len(layout.Hysteria2)+1)
 
 	for _, plan := range layout.VLESS {
+		handshakeTarget := handshakeServer
+		if plan.ServerName != "" {
+			handshakeTarget = plan.ServerName
+		}
+
 		inbounds = append(inbounds, map[string]interface{}{
 			"type":        "vless",
 			"tag":         plan.Tag,
@@ -56,7 +61,7 @@ func Generate(nodeName, publicHost string, realityPrivateKey, realityServerName,
 				"reality": map[string]interface{}{
 					"enabled": true,
 					"handshake": map[string]interface{}{
-						"server":      handshakeServer,
+						"server":      handshakeTarget,
 						"server_port": handshakePort,
 					},
 					"private_key": realityPrivateKey,
