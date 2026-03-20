@@ -104,8 +104,10 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 		protected.POST("/nodes/bootstrap", handler.bootstrapNode)
 		protected.GET("/nodes/bootstrap/:jobId", handler.getBootstrapStatus)
 		protected.GET("/nodes", handler.listNodes)
+		protected.POST("/nodes/diagnostics", handler.runNodeDiagnostics)
 		protected.PATCH("/nodes/:id", handler.updateNode)
 		protected.DELETE("/nodes/:id", handler.deleteNode)
+		protected.POST("/nodes/:id/uninstall", handler.uninstallNode)
 		protected.POST("/nodes/:id/reinstall", handler.reinstallNode)
 		protected.POST("/nodes/sync", handler.syncNodes)
 		protected.POST("/bandwidth/collect", handler.triggerBandwidthCollection)
@@ -537,6 +539,25 @@ func (h *Handler) deleteNode(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+func (h *Handler) uninstallNode(c *gin.Context) {
+	if err := h.nodeService.Uninstall(c.Param("id")); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+			return
+		}
+
+		var remoteErr *services.NodeDeleteRemoteError
+		if errors.As(err, &remoteErr) {
+			c.JSON(http.StatusBadGateway, gin.H{"error": remoteErr.Error()})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (h *Handler) reinstallNode(c *gin.Context) {
 	var input services.ReinstallNodeInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -610,6 +631,16 @@ func (h *Handler) syncNodes(c *gin.Context) {
 		"syncedUsers": len(users),
 		"results":     results,
 	})
+}
+
+func (h *Handler) runNodeDiagnostics(c *gin.Context) {
+	results, err := h.nodeService.RunDiagnostics()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"results": results})
 }
 
 func (h *Handler) getSubscription(c *gin.Context) {

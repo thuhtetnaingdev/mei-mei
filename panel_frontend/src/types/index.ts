@@ -79,6 +79,35 @@ export interface Node {
   lastSyncAt?: string | null;
 }
 
+export interface NodePortDiagnostic {
+  label: string;
+  port: number;
+  protocol: string;
+  checked: boolean;
+  reachable: boolean;
+  latencyMs: number;
+  errorMessage?: string;
+}
+
+export interface NodeDiagnosticResult {
+  nodeId: number;
+  nodeName: string;
+  publicHost: string;
+  baseUrl: string;
+  apiReachable: boolean;
+  apiLatencyMs: number;
+  apiErrorMessage?: string;
+  downloadMbps: number;
+  uploadMbps: number;
+  downloadBytes: number;
+  uploadBytes: number;
+  downloadError?: string;
+  uploadError?: string;
+  ports: NodePortDiagnostic[];
+  qualityStatus: string;
+  testedAt: string;
+}
+
 export interface Miner {
   id: number;
   name: string;

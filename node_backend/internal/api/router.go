@@ -1,11 +1,14 @@
 package api
 
 import (
+	"bytes"
+	"io"
 	"log"
 	"net/http"
 	"node_backend/internal/auth"
 	"node_backend/internal/config"
 	"node_backend/internal/services"
+	"strconv"
 	"strings"
 	"time"
 
@@ -130,7 +133,49 @@ func NewRouterWithConfigService(cfg config.Config, configService *services.Confi
 
 			c.JSON(http.StatusAccepted, result)
 		})
+
+		protected.GET("/speed-test/download", func(c *gin.Context) {
+			size := parseSpeedTestSize(c.Query("bytes"), 1024*1024, 256*1024, 2*1024*1024)
+			payload := bytes.Repeat([]byte("MEIMEI_SPEED_TEST_"), (size/18)+1)
+			c.Header("Content-Type", "application/octet-stream")
+			c.Header("Cache-Control", "no-store")
+			c.Header("Content-Length", strconv.Itoa(size))
+			c.Status(http.StatusOK)
+			_, _ = c.Writer.Write(payload[:size])
+		})
+
+		protected.POST("/speed-test/upload", func(c *gin.Context) {
+			size, err := io.Copy(io.Discard, c.Request.Body)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"receivedBytes": size,
+				"status":        "ok",
+			})
+		})
 	}
 
 	return router
+}
+
+func parseSpeedTestSize(value string, fallback, min, max int) int {
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+
+	if parsed < min {
+		return min
+	}
+	if parsed > max {
+		return max
+	}
+	return parsed
 }

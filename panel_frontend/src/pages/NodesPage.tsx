@@ -3,7 +3,7 @@ import { Globe, PauseCircle, PlayCircle, Plus, RefreshCw, ServerCog, ShieldCheck
 import api from "../api/client";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { SectionCard } from "../components/SectionCard";
-import type { Node } from "../types";
+import type { Node, NodeDiagnosticResult } from "../types";
 
 interface BootstrapResult {
   id: string;
@@ -12,6 +12,10 @@ interface BootstrapResult {
   steps: string[];
   logs: string[];
   error?: string;
+}
+
+interface NodeDiagnosticsResponse {
+  results: NodeDiagnosticResult[];
 }
 
 const emptyBootstrapForm = {
@@ -52,10 +56,13 @@ export function NodesPage() {
   const [createNodeDialogOpen, setCreateNodeDialogOpen] = useState(false);
   const [nodeActionStatus, setNodeActionStatus] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Node | null>(null);
+  const [uninstallTarget, setUninstallTarget] = useState<Node | null>(null);
   const [toggleTarget, setToggleTarget] = useState<Node | null>(null);
   const [reinstallTarget, setReinstallTarget] = useState<Node | null>(null);
   const [isReinstalling, setIsReinstalling] = useState(false);
   const [isTogglingNode, setIsTogglingNode] = useState(false);
+  const [isRunningDiagnostics, setIsRunningDiagnostics] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<NodeDiagnosticResult[]>([]);
   const [editingNode, setEditingNode] = useState<Node | null>(null);
   const [nodeEditForm, setNodeEditForm] = useState({
     location: "",
@@ -133,6 +140,21 @@ export function NodesPage() {
     await loadNodes();
   };
 
+  const runDiagnostics = async () => {
+    setIsRunningDiagnostics(true);
+    setNodeActionStatus("");
+
+    try {
+      const response = await api.post<NodeDiagnosticsResponse>("/nodes/diagnostics", {});
+      setDiagnostics(response.data.results ?? []);
+      setNodeActionStatus(`Tested ${response.data.results?.length ?? 0} nodes.`);
+    } catch (error) {
+      setNodeActionStatus(getRequestErrorMessage(error, "Node test failed"));
+    } finally {
+      setIsRunningDiagnostics(false);
+    }
+  };
+
   const openEditNode = (node: Node) => {
     setEditingNode(node);
     setNodeEditForm({
@@ -178,11 +200,26 @@ export function NodesPage() {
 
     try {
       await api.delete(`/nodes/${deleteTarget.id}`);
-      setNodeActionStatus(`Deleted node ${deleteTarget.name}.`);
+      setNodeActionStatus(`Removed node ${deleteTarget.name} from the panel database.`);
       setDeleteTarget(null);
       await loadNodes();
     } catch (error) {
       setNodeActionStatus(getRequestErrorMessage(error, "Delete failed"));
+    }
+  };
+
+  const uninstallNode = async () => {
+    if (!uninstallTarget) {
+      return;
+    }
+
+    try {
+      await api.post(`/nodes/${uninstallTarget.id}/uninstall`, {});
+      setNodeActionStatus(`Uninstalled node ${uninstallTarget.name} and removed it from the panel.`);
+      setUninstallTarget(null);
+      await loadNodes();
+    } catch (error) {
+      setNodeActionStatus(getRequestErrorMessage(error, "Uninstall failed"));
     }
   };
 
@@ -287,6 +324,23 @@ export function NodesPage() {
   const offlineNodes = nodes.filter((node) => node.healthStatus === "offline").length;
   const enabledNodes = nodes.filter((node) => node.enabled).length;
   const disabledNodes = nodes.filter((node) => !node.enabled).length;
+  const healthyDiagnostics = diagnostics.filter((entry) => entry.qualityStatus === "healthy").length;
+  const degradedDiagnostics = diagnostics.filter((entry) => entry.qualityStatus === "degraded").length;
+  const offlineDiagnostics = diagnostics.filter((entry) => entry.qualityStatus === "offline").length;
+
+  const formatLatency = (value: number) => {
+    if (!value) {
+      return "n/a";
+    }
+    return `${value} ms`;
+  };
+
+  const formatSpeed = (value: number) => {
+    if (!value) {
+      return "n/a";
+    }
+    return `${value >= 100 ? value.toFixed(0) : value >= 10 ? value.toFixed(1) : value.toFixed(2)} Mbps`;
+  };
 
   return (
     <div className="space-y-4">
@@ -305,6 +359,15 @@ export function NodesPage() {
               <button type="button" onClick={() => void syncNodes()} className="btn-secondary justify-center gap-1.5 px-3 py-2 text-sm">
                 <RefreshCw className="h-3.5 w-3.5" />
                 Sync
+              </button>
+              <button
+                type="button"
+                onClick={() => void runDiagnostics()}
+                disabled={isRunningDiagnostics}
+                className="btn-secondary justify-center gap-1.5 px-3 py-2 text-sm"
+              >
+                <Wrench className="h-3.5 w-3.5" />
+                {isRunningDiagnostics ? "Testing..." : "Test All"}
               </button>
             </div>
           }
@@ -382,6 +445,103 @@ export function NodesPage() {
         </SectionCard>
       ) : null}
 
+      {diagnostics.length > 0 ? (
+        <SectionCard
+          eyebrow="Node Diagnostics"
+          title="Manual speed-quality snapshot"
+          description="These are manual panel-to-node checks focused on what matters for the MVP: API latency plus a small upload and download speed sample."
+        >
+          <div className="space-y-4">
+            <div className="grid gap-2.5 sm:grid-cols-3">
+              <div className="panel-subtle p-3">
+                <p className="metric-kicker">Healthy</p>
+                <p className="mt-2 font-display text-2xl font-bold text-emerald-300">{healthyDiagnostics}</p>
+              </div>
+              <div className="panel-subtle p-3">
+                <p className="metric-kicker">Degraded</p>
+                <p className="mt-2 font-display text-2xl font-bold text-amber-200">{degradedDiagnostics}</p>
+              </div>
+              <div className="panel-subtle p-3">
+                <p className="metric-kicker">Offline</p>
+                <p className="mt-2 font-display text-2xl font-bold text-rose-300">{offlineDiagnostics}</p>
+              </div>
+            </div>
+
+            <div className="grid gap-3 xl:grid-cols-2">
+              {diagnostics.map((entry) => (
+                <div key={entry.nodeId} className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-sm font-semibold text-white">{entry.nodeName}</h3>
+                        <span className={`status-pill ${
+                          entry.qualityStatus === "healthy"
+                            ? "text-emerald-300"
+                            : entry.qualityStatus === "degraded"
+                              ? "text-amber-200"
+                              : "text-rose-300"
+                        }`}>
+                          <span className={`h-2 w-2 rounded-full ${
+                            entry.qualityStatus === "healthy"
+                              ? "bg-emerald-400"
+                              : entry.qualityStatus === "degraded"
+                                ? "bg-amber-300"
+                                : "bg-rose-400"
+                          }`} />
+                          {entry.qualityStatus}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">{entry.publicHost || entry.baseUrl}</p>
+                    </div>
+                    <p className="text-xs text-slate-500">{new Date(entry.testedAt).toLocaleString()}</p>
+                  </div>
+
+                  <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
+                    <div className="rounded-[18px] border border-white/10 bg-slate-950/28 px-3 py-3">
+                      <p className="metric-kicker">API Latency</p>
+                      <p className="mt-2 text-sm font-semibold text-white">
+                        {entry.apiReachable ? formatLatency(entry.apiLatencyMs) : "Offline"}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">{entry.apiErrorMessage || "Node API /status probe"}</p>
+                    </div>
+                    <div className="rounded-[18px] border border-white/10 bg-slate-950/28 px-3 py-3">
+                      <p className="metric-kicker">Download</p>
+                      <p className="mt-2 text-sm font-semibold text-white">
+                        {entry.downloadError ? "Failed" : formatSpeed(entry.downloadMbps)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {entry.downloadError || `${formatBytes(entry.downloadBytes)} sample from node agent`}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <div className="rounded-[18px] border border-white/10 bg-slate-950/28 px-3 py-3">
+                      <p className="metric-kicker">Upload</p>
+                      <p className="mt-2 text-sm font-semibold text-white">
+                        {entry.uploadError ? "Failed" : formatSpeed(entry.uploadMbps)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {entry.uploadError || `${formatBytes(entry.uploadBytes)} sample pushed to node agent`}
+                      </p>
+                    </div>
+                    <div className="rounded-[18px] border border-white/10 bg-slate-950/28 px-3 py-3">
+                      <p className="metric-kicker">Snapshot</p>
+                      <p className="mt-2 text-sm font-semibold text-white">
+                        {entry.qualityStatus === "healthy" ? "Looks solid" : entry.qualityStatus === "degraded" ? "Needs review" : "Offline"}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Based on API latency plus small upload and download probes from the panel host.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </SectionCard>
+      ) : null}
+
       <SectionCard eyebrow="Node Inventory" title="Registered nodes" description="Compact rows designed for larger fleets, with the controls and node facts kept close together.">
         <div className="space-y-4">
           {nodeActionStatus ? (
@@ -453,11 +613,19 @@ export function NodesPage() {
                           </button>
                           <button
                             onClick={() => setDeleteTarget(node)}
-                            className="inline-flex items-center justify-center gap-1 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-100 transition hover:bg-rose-500/20"
-                            title="Delete node"
+                            className="btn-secondary gap-1 px-3 py-2 text-xs"
+                            title="Delete node from panel only"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                             Delete
+                          </button>
+                          <button
+                            onClick={() => setUninstallTarget(node)}
+                            className="inline-flex items-center justify-center gap-1 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-100 transition hover:bg-rose-500/20"
+                            title="Uninstall node"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Uninstall
                           </button>
                         </div>
                       </div>
@@ -615,11 +783,21 @@ export function NodesPage() {
       <ConfirmDialog
         open={Boolean(deleteTarget)}
         title="Delete node?"
-        description={deleteTarget ? `This will remove ${deleteTarget.name} from the panel and uninstall its Meimei services and files from the VPS. If the VPS is unreachable, deletion will be blocked.` : ""}
+        description={deleteTarget ? `This will only remove ${deleteTarget.name} from the panel database. Nothing will be changed on the VPS.` : ""}
         confirmLabel="Delete Node"
-        tone="danger"
+        tone="neutral"
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => void deleteNode()}
+      />
+
+      <ConfirmDialog
+        open={Boolean(uninstallTarget)}
+        title="Uninstall node?"
+        description={uninstallTarget ? `This will uninstall Meimei services and files from ${uninstallTarget.name}'s VPS, then remove the node from the panel. If the VPS is unreachable, uninstall will be blocked.` : ""}
+        confirmLabel="Uninstall Node"
+        tone="danger"
+        onCancel={() => setUninstallTarget(null)}
+        onConfirm={() => void uninstallNode()}
       />
 
       <ConfirmDialog

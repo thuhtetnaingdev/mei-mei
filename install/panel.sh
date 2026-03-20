@@ -23,6 +23,28 @@ need_cmd systemctl
 need_cmd mktemp
 need_cmd sudo
 
+kill_port_processes() {
+  local port="$1"
+  local pids=""
+
+  if command -v lsof >/dev/null 2>&1; then
+    pids="$(sudo lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)"
+  elif command -v ss >/dev/null 2>&1; then
+    pids="$(sudo ss -ltnp 2>/dev/null | awk -v target=":${port}" '$4 ~ target { if (match($0, /pid=[0-9]+/)) { print substr($0, RSTART + 4, RLENGTH - 4) } }' | sort -u)"
+  fi
+
+  if [[ -z "$pids" ]]; then
+    return
+  fi
+
+  echo "stopping existing listeners on port ${port}: ${pids}"
+  while IFS= read -r pid; do
+    if [[ -n "$pid" ]]; then
+      sudo kill -9 "$pid" 2>/dev/null || true
+    fi
+  done <<< "$pids"
+}
+
 arch="$(uname -m)"
 case "$arch" in
   x86_64|amd64) asset_arch="amd64" ;;
@@ -192,6 +214,8 @@ ENV_FILE=${env_file}
 CLI_PATH=${CLI_PATH}
 EOF
 sudo install -m 0755 "$tmp_dir/mei" "$CLI_PATH"
+
+kill_port_processes "$BACKEND_PORT"
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now "${SERVICE_NAME}.service"

@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	neturl "net/url"
 	"panel_backend/internal/models"
 	"strings"
 	"sync"
@@ -96,6 +98,35 @@ type BootstrapJob struct {
 	StartedAt  time.Time          `json:"startedAt"`
 	FinishedAt *time.Time         `json:"finishedAt,omitempty"`
 	Input      BootstrapNodeInput `json:"input"`
+}
+
+type NodePortDiagnostic struct {
+	Label        string `json:"label"`
+	Port         int    `json:"port"`
+	Protocol     string `json:"protocol"`
+	Checked      bool   `json:"checked"`
+	Reachable    bool   `json:"reachable"`
+	LatencyMs    int64  `json:"latencyMs"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
+}
+
+type NodeDiagnosticResult struct {
+	NodeID          uint                 `json:"nodeId"`
+	NodeName        string               `json:"nodeName"`
+	PublicHost      string               `json:"publicHost"`
+	BaseURL         string               `json:"baseUrl"`
+	APIReachable    bool                 `json:"apiReachable"`
+	APILatencyMs    int64                `json:"apiLatencyMs"`
+	APIErrorMessage string               `json:"apiErrorMessage,omitempty"`
+	DownloadMbps    float64              `json:"downloadMbps"`
+	UploadMbps      float64              `json:"uploadMbps"`
+	DownloadBytes   int64                `json:"downloadBytes"`
+	UploadBytes     int64                `json:"uploadBytes"`
+	DownloadError   string               `json:"downloadError,omitempty"`
+	UploadError     string               `json:"uploadError,omitempty"`
+	Ports           []NodePortDiagnostic `json:"ports"`
+	QualityStatus   string               `json:"qualityStatus"`
+	TestedAt        time.Time            `json:"testedAt"`
 }
 
 func NewNodeService(db *gorm.DB, sharedToken string, timeout time.Duration, userService *UserService) *NodeService {
@@ -253,6 +284,20 @@ func (s *NodeService) ListWithRuntimeStatus() ([]models.Node, error) {
 	return nodes, nil
 }
 
+func (s *NodeService) RunDiagnostics() ([]NodeDiagnosticResult, error) {
+	nodes, err := s.List()
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]NodeDiagnosticResult, 0, len(nodes))
+	for _, node := range nodes {
+		results = append(results, s.runNodeDiagnostic(node))
+	}
+
+	return results, nil
+}
+
 func (s *NodeService) Update(id string, input UpdateNodeInput) (*models.Node, error) {
 	var node models.Node
 	if err := s.db.First(&node, "id = ?", id).Error; err != nil {
@@ -290,6 +335,10 @@ func (s *NodeService) Update(id string, input UpdateNodeInput) (*models.Node, er
 }
 
 func (s *NodeService) Delete(id string) error {
+	return s.deleteNodeRecord(id)
+}
+
+func (s *NodeService) Uninstall(id string) error {
 	var node models.Node
 	if err := s.db.First(&node, "id = ?", id).Error; err != nil {
 		return err
@@ -299,6 +348,10 @@ func (s *NodeService) Delete(id string) error {
 		return &NodeDeleteRemoteError{err: err}
 	}
 
+	return s.deleteNodeRecord(id)
+}
+
+func (s *NodeService) deleteNodeRecord(id string) error {
 	result := s.db.Delete(&models.Node{}, "id = ?", id)
 	if result.RowsAffected == 0 {
 		return gorm.ErrRecordNotFound
@@ -630,4 +683,186 @@ func (s *NodeService) Reinstall(nodeID string, input ReinstallNodeInput) (*Reins
 		Success: true,
 		Message: message,
 	}, nil
+}
+
+func (s *NodeService) runNodeDiagnostic(node models.Node) NodeDiagnosticResult {
+	result := NodeDiagnosticResult{
+		NodeID:        node.ID,
+		NodeName:      node.Name,
+		PublicHost:    node.PublicHost,
+		BaseURL:       node.BaseURL,
+		QualityStatus: "healthy",
+		TestedAt:      time.Now(),
+	}
+
+	apiLatency, apiErr := s.measureHTTPLatency(strings.TrimRight(node.BaseURL, "/") + "/status")
+	if apiErr != nil {
+		result.APIReachable = false
+		result.APIErrorMessage = apiErr.Error()
+		result.QualityStatus = "offline"
+	} else {
+		result.APIReachable = true
+		result.APILatencyMs = apiLatency
+	}
+
+	if result.APIReachable {
+		downloadMbps, downloadBytes, downloadErr := s.measureNodeDownload(node, 1024*1024)
+		if downloadErr != nil {
+			result.DownloadError = downloadErr.Error()
+		} else {
+			result.DownloadMbps = downloadMbps
+			result.DownloadBytes = downloadBytes
+		}
+
+		uploadMbps, uploadBytes, uploadErr := s.measureNodeUpload(node, 512*1024)
+		if uploadErr != nil {
+			result.UploadError = uploadErr.Error()
+		} else {
+			result.UploadMbps = uploadMbps
+			result.UploadBytes = uploadBytes
+		}
+	}
+
+	if result.QualityStatus != "offline" {
+		switch {
+		case !result.APIReachable:
+			result.QualityStatus = "offline"
+		case result.DownloadError != "" || result.UploadError != "":
+			result.QualityStatus = "degraded"
+		case result.APILatencyMs >= 1200 || result.DownloadMbps < 5 || result.UploadMbps < 2:
+			result.QualityStatus = "degraded"
+		default:
+			result.QualityStatus = "healthy"
+		}
+	}
+
+	return result
+}
+
+func (s *NodeService) measureHTTPLatency(target string) (int64, error) {
+	startedAt := time.Now()
+	req, err := http.NewRequest(http.MethodGet, target, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return 0, fmt.Errorf("status %d", resp.StatusCode)
+	}
+
+	return time.Since(startedAt).Milliseconds(), nil
+}
+
+func (s *NodeService) measureNodeDownload(node models.Node, sizeBytes int64) (float64, int64, error) {
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/speed-test/download?bytes=%d", strings.TrimRight(node.BaseURL, "/"), sizeBytes), nil)
+	if err != nil {
+		return 0, 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+node.ProtocolToken)
+	req.Header.Set("X-Control-Plane-Token", s.sharedToken)
+
+	startedAt := time.Now()
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return 0, 0, fmt.Errorf("status %d", resp.StatusCode)
+	}
+
+	written, err := io.Copy(io.Discard, resp.Body)
+	if err != nil {
+		return 0, written, err
+	}
+
+	return calculateMbps(written, time.Since(startedAt)), written, nil
+}
+
+func (s *NodeService) measureNodeUpload(node models.Node, sizeBytes int64) (float64, int64, error) {
+	payload := bytes.Repeat([]byte("MEIMEI_UPLOAD_TEST"), int(sizeBytes/18)+1)
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/speed-test/upload", strings.TrimRight(node.BaseURL, "/")), bytes.NewReader(payload[:sizeBytes]))
+	if err != nil {
+		return 0, 0, err
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("Authorization", "Bearer "+node.ProtocolToken)
+	req.Header.Set("X-Control-Plane-Token", s.sharedToken)
+
+	startedAt := time.Now()
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return 0, 0, fmt.Errorf("status %d", resp.StatusCode)
+	}
+
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return calculateMbps(sizeBytes, time.Since(startedAt)), sizeBytes, nil
+}
+
+func calculateMbps(bytesTransferred int64, duration time.Duration) float64 {
+	seconds := duration.Seconds()
+	if seconds <= 0 {
+		return 0
+	}
+	return (float64(bytesTransferred) * 8) / seconds / 1_000_000
+}
+
+func (s *NodeService) measureTCPPort(label, host string, port int, protocol string) NodePortDiagnostic {
+	diagnostic := NodePortDiagnostic{
+		Label:    label,
+		Port:     port,
+		Protocol: protocol,
+		Checked:  true,
+	}
+
+	if host == "" || port <= 0 {
+		diagnostic.ErrorMessage = "not configured"
+		return diagnostic
+	}
+
+	targetHost := host
+	if parsed, err := neturl.Parse(host); err == nil && parsed.Hostname() != "" {
+		targetHost = parsed.Hostname()
+	}
+
+	startedAt := time.Now()
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(targetHost, fmt.Sprintf("%d", port)), 5*time.Second)
+	if err != nil {
+		diagnostic.ErrorMessage = err.Error()
+		return diagnostic
+	}
+	_ = conn.Close()
+
+	diagnostic.Reachable = true
+	diagnostic.LatencyMs = time.Since(startedAt).Milliseconds()
+	return diagnostic
+}
+
+func (s *NodeService) measureUnsupportedUDPPort(label, host string, port int) NodePortDiagnostic {
+	diagnostic := NodePortDiagnostic{
+		Label:    label,
+		Port:     port,
+		Protocol: "udp-pending",
+		Checked:  false,
+	}
+
+	if host == "" || port <= 0 {
+		diagnostic.ErrorMessage = "not configured"
+		return diagnostic
+	}
+
+	diagnostic.ErrorMessage = "UDP quality probe not implemented yet"
+	return diagnostic
 }

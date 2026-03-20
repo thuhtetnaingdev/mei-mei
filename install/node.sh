@@ -39,6 +39,28 @@ if [[ -z "$NODE_TOKEN" ]]; then
   NODE_TOKEN="$(openssl rand -hex 16)"
 fi
 
+kill_port_processes() {
+  local port="$1"
+  local pids=""
+
+  if command -v lsof >/dev/null 2>&1; then
+    pids="$(sudo lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)"
+  elif command -v ss >/dev/null 2>&1; then
+    pids="$(sudo ss -ltnp 2>/dev/null | awk -v target=":${port}" '$4 ~ target { if (match($0, /pid=[0-9]+/)) { print substr($0, RSTART + 4, RLENGTH - 4) } }' | sort -u)"
+  fi
+
+  if [[ -z "$pids" ]]; then
+    return
+  fi
+
+  echo "stopping existing listeners on port ${port}: ${pids}"
+  while IFS= read -r pid; do
+    if [[ -n "$pid" ]]; then
+      sudo kill -9 "$pid" 2>/dev/null || true
+    fi
+  done <<< "$pids"
+}
+
 arch="$(uname -m)"
 case "$arch" in
   x86_64|amd64) asset_arch="amd64" ;;
@@ -170,6 +192,8 @@ RestartSec=3
 [Install]
 WantedBy=multi-user.target
 EOF
+
+kill_port_processes "$NODE_PORT"
 
 if command -v ufw >/dev/null 2>&1; then
   sudo ufw allow "${NODE_PORT}/tcp" >/dev/null 2>&1 || true
