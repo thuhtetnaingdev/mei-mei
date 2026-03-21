@@ -14,7 +14,7 @@ func GenerateSingboxProfile(user models.User, nodes []models.Node, settings serv
 }
 
 func GenerateClashProfile(user models.User, nodes []models.Node, settings services.ProtocolSettings) ([]byte, error) {
-	config := buildSingboxProfileConfig(user, nodes, settings)
+	config := buildClashProfileConfig(user, nodes, settings)
 	return yaml.Marshal(config)
 }
 
@@ -173,6 +173,124 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 					"outbound":   "direct",
 				},
 			},
+		},
+	}
+}
+
+func buildClashProfileConfig(user models.User, nodes []models.Node, settings services.ProtocolSettings) map[string]interface{} {
+	availableNodes := filterAvailableNodes(nodes)
+	proxies := make([]map[string]interface{}, 0)
+	proxyNames := make([]string, 0)
+
+	for _, node := range availableNodes {
+		plan := buildNodeTransportPlan(node, settings)
+
+		for _, variant := range plan.Reality {
+			name := variant.Tag
+			proxyNames = append(proxyNames, name)
+			proxies = append(proxies, map[string]interface{}{
+				"name":               name,
+				"type":               "vless",
+				"server":             node.PublicHost,
+				"port":               variant.Port,
+				"uuid":               user.UUID,
+				"network":            "tcp",
+				"udp":                true,
+				"tls":                true,
+				"flow":               "xtls-rprx-vision",
+				"servername":         variant.ServerName,
+				"skip-cert-verify":   true,
+				"client-fingerprint": "chrome",
+				"reality-opts": map[string]interface{}{
+					"public-key": node.RealityPublicKey,
+					"short-id":   node.RealityShortID,
+				},
+			})
+		}
+
+		if plan.TUIC.Port > 0 {
+			name := plan.TUIC.Tag
+			proxyNames = append(proxyNames, name)
+			proxies = append(proxies, map[string]interface{}{
+				"name":                  name,
+				"type":                  "tuic",
+				"server":                node.PublicHost,
+				"port":                  plan.TUIC.Port,
+				"uuid":                  user.UUID,
+				"password":              user.UUID,
+				"udp":                   true,
+				"sni":                   node.PublicHost,
+				"skip-cert-verify":      true,
+				"congestion-controller": "bbr",
+			})
+		}
+
+		shadowsocks := buildShadowsocksVariant(node, user)
+		if shadowsocks.Port > 0 {
+			name := shadowsocks.Tag
+			proxyNames = append(proxyNames, name)
+			proxies = append(proxies, map[string]interface{}{
+				"name":     name,
+				"type":     "ss",
+				"server":   node.PublicHost,
+				"port":     shadowsocks.Port,
+				"cipher":   shadowsocks2022Method,
+				"password": shadowsocks.Password,
+				"udp":      true,
+			})
+		}
+
+		for _, variant := range plan.Hysteria2 {
+			name := variant.Tag
+			proxyNames = append(proxyNames, name)
+			proxy := map[string]interface{}{
+				"name":             name,
+				"type":             "hysteria2",
+				"server":           node.PublicHost,
+				"port":             variant.Port,
+				"password":         user.UUID,
+				"sni":              node.PublicHost,
+				"skip-cert-verify": true,
+				"udp":              true,
+			}
+			if variant.ObfsPassword != "" {
+				proxy["obfs"] = "salamander"
+				proxy["obfs-password"] = variant.ObfsPassword
+			}
+			proxies = append(proxies, proxy)
+		}
+	}
+
+	groupProxies := append([]string{"AUTO", "DIRECT"}, proxyNames...)
+	autoGroupProxies := proxyNames
+	if len(autoGroupProxies) == 0 {
+		autoGroupProxies = []string{"DIRECT"}
+	}
+
+	return map[string]interface{}{
+		"mixed-port": 7890,
+		"allow-lan":  false,
+		"mode":       "rule",
+		"log-level":  "info",
+		"ipv6":       true,
+		"proxies":    proxies,
+		"proxy-groups": []map[string]interface{}{
+			{
+				"name":      "AUTO",
+				"type":      "url-test",
+				"proxies":   autoGroupProxies,
+				"url":       "http://www.gstatic.com/generate_204",
+				"interval":  600,
+				"tolerance": 50,
+			},
+			{
+				"name":    "Proxy",
+				"type":    "select",
+				"proxies": groupProxies,
+			},
+		},
+		"rules": []string{
+			"MATCH,Proxy",
 		},
 	}
 }
