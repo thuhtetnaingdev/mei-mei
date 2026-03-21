@@ -2,6 +2,7 @@ package services
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	statsservice "github.com/xtls/xray-core/app/stats/command"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // BandwidthSample represents a point-in-time bandwidth measurement
@@ -30,18 +35,23 @@ type UserBandwidthUsage struct {
 // BandwidthTracker monitors and tracks bandwidth usage per user
 type BandwidthTracker struct {
 	mu                 sync.RWMutex
+	apiAddress         string
 	lastSample         BandwidthSample
 	currentPeriodUsage map[string]*UserBandwidthUsage
 	activeUsers        map[string]bool // Set of active user UUIDs
-	connectionCounts   map[string]int  // UUID -> connection count
+	lastUserTotals     map[string]int64
+	connectionCounts   map[string]int // UUID -> connection count
+	totalConnections   int
 }
 
 // NewBandwidthTracker creates a new bandwidth tracker
-func NewBandwidthTracker() *BandwidthTracker {
+func NewBandwidthTracker(apiAddress string) *BandwidthTracker {
 	return &BandwidthTracker{
 		currentPeriodUsage: make(map[string]*UserBandwidthUsage),
 		activeUsers:        make(map[string]bool),
+		lastUserTotals:     make(map[string]int64),
 		connectionCounts:   make(map[string]int),
+		apiAddress:         strings.TrimSpace(apiAddress),
 	}
 }
 
@@ -55,13 +65,12 @@ func (t *BandwidthTracker) UpdateActiveUsers(users []struct {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Clear old active users
-	t.activeUsers = make(map[string]bool)
+	newActiveUsers := make(map[string]bool)
 
 	// Update with new active users
 	for _, user := range users {
 		if user.Enabled {
-			t.activeUsers[user.UUID] = true
+			newActiveUsers[user.UUID] = true
 
 			// Initialize or update user usage record
 			if _, exists := t.currentPeriodUsage[user.UUID]; !exists {
@@ -70,10 +79,26 @@ func (t *BandwidthTracker) UpdateActiveUsers(users []struct {
 					Email: user.Email,
 				}
 			} else {
+				if t.currentPeriodUsage[user.UUID].Email != user.Email {
+					delete(t.lastUserTotals, user.UUID)
+				}
 				t.currentPeriodUsage[user.UUID].Email = user.Email
 			}
 		}
 	}
+
+	for uuid := range t.activeUsers {
+		if newActiveUsers[uuid] {
+			continue
+		}
+		delete(t.lastUserTotals, uuid)
+		if usage, exists := t.currentPeriodUsage[uuid]; exists {
+			usage.ActiveConns = 0
+			usage.BytesUsed = 0
+		}
+	}
+
+	t.activeUsers = newActiveUsers
 }
 
 func readBandwidthSample() (BandwidthSample, error) {
@@ -152,9 +177,18 @@ func (t *BandwidthTracker) UpdateConnectionCounts(ports ...int) {
 
 	// Get connection counts from sing-box ports
 	connCounts := getConnectionCountsByPort(ports...)
+	totalConnections := 0
+	for _, port := range ports {
+		count, err := getActiveConnections(port)
+		if err != nil {
+			continue
+		}
+		totalConnections += count
+	}
 
 	// Update connection counts
 	t.connectionCounts = connCounts
+	t.totalConnections = totalConnections
 
 	// Update active connection counts in user usage records
 	for uuid, count := range connCounts {
@@ -178,6 +212,10 @@ func getConnectionCountsByPort(ports ...int) map[string]int {
 
 // CollectUsage reads a new sample and accrues the delta into the current period.
 func (t *BandwidthTracker) CollectUsage() (int64, time.Duration, error) {
+	if t.apiAddress != "" {
+		return t.collectUsageFromV2RayAPI()
+	}
+
 	currentSample, err := readBandwidthSample()
 	if err != nil {
 		return 0, 0, err
@@ -202,13 +240,17 @@ func (t *BandwidthTracker) CollectUsage() (int64, time.Duration, error) {
 		return delta, duration, nil
 	}
 
-	// Calculate total weight based on active connections.
+	// Ignore background server traffic if the node has no active proxy
+	// connections at all during this sample window.
+	if t.totalConnections <= 0 {
+		return delta, duration, nil
+	}
+
+	// Prefer user-specific connection evidence when we have it.
 	totalWeight := 0
 	for uuid := range t.activeUsers {
-		if count, exists := t.connectionCounts[uuid]; exists && count > 0 {
+		if count := t.connectionCounts[uuid]; count > 0 {
 			totalWeight += count
-		} else {
-			totalWeight++
 		}
 	}
 
@@ -217,9 +259,9 @@ func (t *BandwidthTracker) CollectUsage() (int64, time.Duration, error) {
 	}
 
 	for uuid := range t.activeUsers {
-		weight := 1
-		if count, exists := t.connectionCounts[uuid]; exists && count > 0 {
-			weight = count
+		weight := t.connectionCounts[uuid]
+		if weight <= 0 {
+			weight = 1
 		}
 
 		userBytes := (delta * int64(weight)) / int64(totalWeight)
@@ -229,6 +271,95 @@ func (t *BandwidthTracker) CollectUsage() (int64, time.Duration, error) {
 	}
 
 	return delta, duration, nil
+}
+
+func (t *BandwidthTracker) collectUsageFromV2RayAPI() (int64, time.Duration, error) {
+	statsByEmail, err := t.queryV2RayUserTotals()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	now := time.Now()
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	duration := time.Duration(0)
+	if !t.lastSample.Timestamp.IsZero() {
+		duration = now.Sub(t.lastSample.Timestamp)
+	}
+
+	deltaTotal := int64(0)
+	snapshotTotal := int64(0)
+	for uuid := range t.activeUsers {
+		usage, exists := t.currentPeriodUsage[uuid]
+		if !exists {
+			continue
+		}
+
+		total := statsByEmail[usage.Email]
+		snapshotTotal += total
+		usage.ActiveConns = 0
+
+		previous, seen := t.lastUserTotals[uuid]
+		if !seen {
+			t.lastUserTotals[uuid] = total
+			continue
+		}
+
+		delta := total - previous
+		if delta < 0 {
+			delta = total
+		}
+		if delta > 0 {
+			usage.BytesUsed += delta
+			deltaTotal += delta
+		}
+		t.lastUserTotals[uuid] = total
+	}
+
+	t.lastSample = BandwidthSample{
+		Timestamp:  now,
+		TotalBytes: snapshotTotal,
+	}
+
+	return deltaTotal, duration, nil
+}
+
+func (t *BandwidthTracker) queryV2RayUserTotals() (map[string]int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	conn, err := grpc.DialContext(
+		ctx,
+		t.apiAddress,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("connect v2ray api %s: %w", t.apiAddress, err)
+	}
+	defer conn.Close()
+
+	client := statsservice.NewStatsServiceClient(conn)
+	response, err := client.QueryStats(ctx, &statsservice.QueryStatsRequest{
+		Pattern: "user>>>",
+		Reset_:  false,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("query v2ray stats: %w", err)
+	}
+
+	totals := make(map[string]int64)
+	for _, stat := range response.GetStat() {
+		email, value, ok := parseV2RayUserTrafficStat(stat.GetName(), stat.GetValue())
+		if !ok {
+			continue
+		}
+		totals[email] += value
+	}
+
+	return totals, nil
 }
 
 // GetAndResetUsage returns the current period usage and resets for the next period
@@ -275,12 +406,38 @@ func (t *BandwidthTracker) GetStatus() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
+		"apiAddress":       t.apiAddress,
 		"lastSampleTime":   t.lastSample.Timestamp,
 		"totalBytes":       t.lastSample.TotalBytes,
 		"activeUsers":      len(t.activeUsers),
+		"activeConns":      t.totalConnections,
 		"trackedUsers":     len(t.currentPeriodUsage),
 		"periodUsageBytes": total,
 	}
+}
+
+func parseV2RayUserTrafficStat(name string, value int64) (string, int64, bool) {
+	if !strings.HasPrefix(name, "user>>>") {
+		return "", 0, false
+	}
+	if !strings.HasSuffix(name, ">>>traffic>>>uplink") && !strings.HasSuffix(name, ">>>traffic>>>downlink") {
+		return "", 0, false
+	}
+
+	parts := strings.Split(name, ">>>")
+	if len(parts) != 4 {
+		return "", 0, false
+	}
+	if parts[0] != "user" || parts[2] != "traffic" {
+		return "", 0, false
+	}
+
+	email := strings.TrimSpace(parts[1])
+	if email == "" || value <= 0 {
+		return "", 0, false
+	}
+
+	return email, value, true
 }
 
 // readBandwidthUsageBytes reads total bandwidth from /proc/net/dev

@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,7 +41,7 @@ type ConfigService struct {
 }
 
 func NewConfigService(cfg config.Config) *ConfigService {
-	tracker := NewBandwidthTracker()
+	tracker := NewBandwidthTracker(cfg.SingboxV2RayAPIListen)
 	service := &ConfigService{
 		cfg:              cfg,
 		bandwidthTracker: tracker,
@@ -97,6 +98,7 @@ func (s *ConfigService) Apply(req ApplyConfigRequest) error {
 		s.cfg.TLSCertificatePath,
 		s.cfg.TLSKeyPath,
 		s.cfg.TLSServerName,
+		s.cfg.SingboxV2RayAPIListen,
 		req.RealitySNIs,
 		req.Hysteria2Masquerades,
 		users,
@@ -109,6 +111,9 @@ func (s *ConfigService) Apply(req ApplyConfigRequest) error {
 	if err := os.WriteFile(s.cfg.SingboxConfigPath, payload, 0o644); err != nil {
 		s.setError(err.Error())
 		return err
+	}
+	if err := s.ensureV2RayAPIEnvDefault(); err != nil {
+		log.Printf("[config-service] env sync warning: %v", err)
 	}
 
 	if err := s.ensureFirewallPorts(req); err != nil {
@@ -189,10 +194,12 @@ func (s *ConfigService) StartBandwidthMonitoring(ctx context.Context, interval t
 				log.Printf("[bandwidth-monitor] stopped")
 				return
 			case <-ticker.C:
-				s.mu.RLock()
-				ports := append([]int(nil), s.activeListenPorts...)
-				s.mu.RUnlock()
-				tracker.UpdateConnectionCounts(ports...)
+				if s.cfg.SingboxV2RayAPIListen == "" {
+					s.mu.RLock()
+					ports := append([]int(nil), s.activeListenPorts...)
+					s.mu.RUnlock()
+					tracker.UpdateConnectionCounts(ports...)
+				}
 				delta, duration, err := tracker.CollectUsage()
 				if err != nil {
 					log.Printf("[bandwidth-monitor] sample failed: %v", err)
@@ -242,6 +249,58 @@ func (s *ConfigService) setError(message string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastError = message
+}
+
+func (s *ConfigService) ensureV2RayAPIEnvDefault() error {
+	listenAddress := strings.TrimSpace(s.cfg.SingboxV2RayAPIListen)
+	if listenAddress == "" || s.cfg.NodeBinaryPath == "" {
+		return nil
+	}
+
+	envPath := filepath.Join(filepath.Dir(s.cfg.NodeBinaryPath), ".env")
+	content, err := os.ReadFile(envPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	lines := strings.Split(string(content), "\n")
+	found := false
+	changed := false
+	for index, line := range lines {
+		if !strings.HasPrefix(line, "SINGBOX_V2RAY_API_LISTEN=") {
+			continue
+		}
+
+		found = true
+		if strings.TrimSpace(strings.TrimPrefix(line, "SINGBOX_V2RAY_API_LISTEN=")) != "" {
+			return nil
+		}
+
+		lines[index] = "SINGBOX_V2RAY_API_LISTEN=" + listenAddress
+		changed = true
+		break
+	}
+
+	if !found {
+		if len(lines) > 0 && lines[len(lines)-1] == "" {
+			lines = lines[:len(lines)-1]
+		}
+		lines = append(lines, "SINGBOX_V2RAY_API_LISTEN="+listenAddress)
+		changed = true
+	}
+
+	if !changed {
+		return nil
+	}
+
+	updated := strings.Join(lines, "\n")
+	if !strings.HasSuffix(updated, "\n") {
+		updated += "\n"
+	}
+	return os.WriteFile(envPath, []byte(updated), 0o644)
 }
 
 func countEnabledUsers(users []struct {

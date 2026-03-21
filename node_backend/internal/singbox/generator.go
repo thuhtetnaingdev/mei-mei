@@ -11,20 +11,23 @@ type User struct {
 }
 
 type Config struct {
-	Log       map[string]interface{}   `json:"log"`
-	Inbounds  []map[string]interface{} `json:"inbounds"`
-	Outbounds []map[string]interface{} `json:"outbounds"`
-	Route     map[string]interface{}   `json:"route"`
+	Log          map[string]interface{}   `json:"log"`
+	Experimental map[string]interface{}   `json:"experimental,omitempty"`
+	Inbounds     []map[string]interface{} `json:"inbounds"`
+	Outbounds    []map[string]interface{} `json:"outbounds"`
+	Route        map[string]interface{}   `json:"route"`
 }
 
-func Generate(nodeName, publicHost string, realityPrivateKey, realityServerName, realityShortID, handshakeServer string, handshakePort int, tlsCertPath, tlsKeyPath, tlsServerName string, realitySNIs, hysteria2Masquerades []string, users []User) ([]byte, error) {
+func Generate(nodeName, publicHost string, realityPrivateKey, realityServerName, realityShortID, handshakeServer string, handshakePort int, tlsCertPath, tlsKeyPath, tlsServerName, v2rayAPIListen string, realitySNIs, hysteria2Masquerades []string, users []User) ([]byte, error) {
 	vlessClients := make([]map[string]interface{}, 0, len(users))
 	tuicClients := make([]map[string]interface{}, 0, len(users))
 	hy2Clients := make([]map[string]interface{}, 0, len(users))
+	statsUsers := make([]string, 0, len(users))
 	for _, user := range users {
 		if !user.Enabled {
 			continue
 		}
+		statsUsers = append(statsUsers, user.Email)
 		vlessClients = append(vlessClients, map[string]interface{}{
 			"uuid": user.UUID,
 			"name": user.Email,
@@ -147,6 +150,17 @@ func Generate(nodeName, publicHost string, realityPrivateKey, realityServerName,
 			"final":                 "direct",
 			"auto_detect_interface": true,
 		},
+	}
+	if v2rayAPIListen != "" {
+		cfg.Experimental = map[string]interface{}{
+			"v2ray_api": map[string]interface{}{
+				"listen": v2rayAPIListen,
+				"stats": map[string]interface{}{
+					"enabled": true,
+					"users":   statsUsers,
+				},
+			},
+		}
 	}
 
 	_ = nodeName

@@ -14,6 +14,7 @@ type Config struct {
 	NodeToken                   string
 	ControlPlaneSharedToken     string
 	SingboxConfigPath           string
+	SingboxV2RayAPIListen       string
 	SingboxReloadCommand        string
 	NodeBinaryPath              string
 	NodeRestartCommand          string
@@ -38,6 +39,7 @@ func Load() Config {
 		NodeToken:                   mustEnv("NODE_TOKEN"),
 		ControlPlaneSharedToken:     mustEnv("CONTROL_PLANE_SHARED_TOKEN"),
 		SingboxConfigPath:           getEnv("SINGBOX_CONFIG_PATH", "./sing-box.generated.json"),
+		SingboxV2RayAPIListen:       getEnv("SINGBOX_V2RAY_API_LISTEN", "127.0.0.1:10085"),
 		SingboxReloadCommand:        getEnv("SINGBOX_RELOAD_COMMAND", "echo reload-sing-box"),
 		NodeBinaryPath:              getEnv("NODE_BINARY_PATH", "/opt/meimei-node/node_backend"),
 		NodeRestartCommand:          getEnv("NODE_RESTART_COMMAND", "systemctl restart meimei-node"),

@@ -28,6 +28,7 @@ const (
 	defaultInstallRepo         = "thuhtetnaingdev/mei-mei"
 	defaultInstallVersion      = "latest"
 	defaultNodeInstallerRawURL = "https://raw.githubusercontent.com/thuhtetnaingdev/mei-mei/main/install/node.sh"
+	defaultNodeV2RayAPIListen  = "127.0.0.1:10085"
 )
 
 type BootstrapNodeInput struct {
@@ -318,6 +319,7 @@ func buildNodeInstallCommand(node models.Node, sharedToken string) string {
 		"MEIMEI_PUBLIC_HOST=" + shellQuote(node.PublicHost),
 		"MEIMEI_NODE_TOKEN=" + shellQuote(node.ProtocolToken),
 		"MEIMEI_CONTROL_PLANE_TOKEN=" + shellQuote(sharedToken),
+		"MEIMEI_SINGBOX_V2RAY_API_LISTEN=" + shellQuote(defaultNodeV2RayAPIListen),
 	}
 
 	return strings.Join(append(env, "bash <(curl -fsSL "+shellQuote(scriptURL)+")"), " ")

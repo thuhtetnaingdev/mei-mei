@@ -178,12 +178,17 @@ func (s *UserService) Delete(id string) error {
 		}
 
 		refundableTokens := 0.0
+		refundableAdminTokens := 0.0
 		for _, allocation := range allocations {
 			if allocation.RemainingTokens > 0 {
 				refundableTokens += allocation.RemainingTokens
 			}
+			refundableAdminTokens += s.calculateAdminRefundForRemainingAllocation(allocation)
 		}
 		if err := s.refundUserTokensToMainWalletTx(tx, user.ID, refundableTokens, "user deleted refund"); err != nil {
+			return err
+		}
+		if err := s.debitAdminWalletTx(tx, user.ID, refundableAdminTokens, "user deleted admin fee rollback"); err != nil {
 			return err
 		}
 		if err := s.createUserRecordTx(tx, user.ID, "deleted", "User deleted", s.describeDeleteRecord(&user, refundableTokens)); err != nil {
@@ -308,6 +313,7 @@ func (s *UserService) ReduceBandwidthAllocation(userID string, input UserBandwid
 
 		remainingReductionBytes := reductionBytes
 		refundedTokens := 0.0
+		refundedAdminTokens := 0.0
 
 		for index := range allocations {
 			allocation := &allocations[index]
@@ -323,12 +329,17 @@ func (s *UserService) ReduceBandwidthAllocation(userID string, input UserBandwid
 
 			reduceBytes := minInt64(remainingReductionBytes, allocation.RemainingBandwidthBytes)
 			refund := 0.0
+			adminRefund := 0.0
 			if allocation.RemainingBandwidthBytes > 0 && allocation.RemainingTokens > 0 {
 				refund = allocation.RemainingTokens * (float64(reduceBytes) / float64(allocation.RemainingBandwidthBytes))
+			}
+			if allocation.RemainingBandwidthBytes > 0 && allocation.AdminAmount > 0 {
+				adminRefund = allocation.AdminAmount * (float64(reduceBytes) / float64(allocation.RemainingBandwidthBytes))
 			}
 
 			allocation.RemainingBandwidthBytes -= reduceBytes
 			allocation.RemainingTokens -= refund
+			allocation.AdminAmount = roundTokenAmount(maxFloat64(0, allocation.AdminAmount-adminRefund))
 			if allocation.RemainingBandwidthBytes <= 0 {
 				allocation.RemainingBandwidthBytes = 0
 				allocation.RemainingTokens = 0
@@ -343,9 +354,13 @@ func (s *UserService) ReduceBandwidthAllocation(userID string, input UserBandwid
 
 			remainingReductionBytes -= reduceBytes
 			refundedTokens += refund
+			refundedAdminTokens += adminRefund
 		}
 
 		if err := s.refundUserTokensToMainWalletTx(tx, user.ID, refundedTokens, s.buildReductionRefundNote(input, refundedTokens)); err != nil {
+			return err
+		}
+		if err := s.debitAdminWalletTx(tx, user.ID, refundedAdminTokens, s.buildReductionAdminRefundNote(input, refundedAdminTokens)); err != nil {
 			return err
 		}
 
@@ -424,6 +439,9 @@ func (s *UserService) AdjustBandwidthAllocation(userID, allocationID string, inp
 			}
 
 			if err := s.refundUserTokensToMainWalletTx(tx, user.ID, tokenDelta, s.buildAdjustmentWalletNote(input, allocation, tokenDelta)); err != nil {
+				return err
+			}
+			if err := s.debitAdminWalletTx(tx, user.ID, adminDelta, s.buildAdjustmentAdminWalletNote(input, allocation, adminDelta)); err != nil {
 				return err
 			}
 
@@ -853,6 +871,35 @@ func (s *UserService) creditAdminWalletTx(tx *gorm.DB, userID uint, amount float
 	return tx.Create(&transferEvent).Error
 }
 
+func (s *UserService) debitAdminWalletTx(tx *gorm.DB, userID uint, amount float64, note string) error {
+	if amount <= 0 {
+		return nil
+	}
+
+	state, err := getOrCreateMintPoolStateTx(tx)
+	if err != nil {
+		return err
+	}
+
+	state.AdminWalletBalance = roundTokenAmount(maxFloat64(0, state.AdminWalletBalance-amount))
+	state.TotalAdminCollected = roundTokenAmount(maxFloat64(0, state.TotalAdminCollected-amount))
+	if err := tx.Save(state).Error; err != nil {
+		return err
+	}
+
+	userIDCopy := userID
+	transferEvent := models.MintPoolTransferEvent{
+		TransferType: "admin_fee_reversal",
+		FromWallet:   "admin_wallet",
+		ToWallet:     fmt.Sprintf("user:%d", userID),
+		Amount:       amount,
+		UserID:       &userIDCopy,
+		Note:         note,
+		CreatedAt:    time.Now(),
+	}
+	return tx.Create(&transferEvent).Error
+}
+
 func (s *UserService) getDistributionSettingsTx(tx *gorm.DB) (allocationDistributionSnapshot, error) {
 	var admin models.AdminSetting
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&admin).Error
@@ -1178,9 +1225,28 @@ func (s *UserService) buildReductionRefundNote(input UserBandwidthReductionInput
 	return note
 }
 
+func (s *UserService) buildReductionAdminRefundNote(input UserBandwidthReductionInput, refundedTokens float64) string {
+	note := fmt.Sprintf("bandwidth reduction admin rollback: %d GB / %.2f tokens", input.BandwidthGB, refundedTokens)
+	if trimmedNote := strings.TrimSpace(input.Note); trimmedNote != "" {
+		note += fmt.Sprintf(" | %s", trimmedNote)
+	}
+	return note
+}
+
 func (s *UserService) buildAdjustmentWalletNote(input UserBandwidthAllocationAdjustmentInput, allocation models.UserBandwidthAllocation, tokenDelta float64) string {
 	return fmt.Sprintf(
 		"bandwidth entry %s: allocation %d, %d GB / %.2f tokens%s",
+		input.Action,
+		allocation.ID,
+		input.BandwidthGB,
+		tokenDelta,
+		formatOptionalNote(input.Note),
+	)
+}
+
+func (s *UserService) buildAdjustmentAdminWalletNote(input UserBandwidthAllocationAdjustmentInput, allocation models.UserBandwidthAllocation, tokenDelta float64) string {
+	return fmt.Sprintf(
+		"bandwidth entry %s admin rollback: allocation %d, %d GB / %.2f tokens%s",
 		input.Action,
 		allocation.ID,
 		input.BandwidthGB,
@@ -1221,6 +1287,15 @@ func normalizedTokenAmount(input UserBandwidthAllocationInput) float64 {
 		return input.TokenAmount
 	}
 	return float64(input.BandwidthGB)
+}
+
+func (s *UserService) calculateAdminRefundForRemainingAllocation(allocation models.UserBandwidthAllocation) float64 {
+	if allocation.AdminAmount <= 0 || allocation.RemainingBandwidthBytes <= 0 || allocation.TotalBandwidthBytes <= 0 {
+		return 0
+	}
+
+	refund := allocation.AdminAmount * (float64(allocation.RemainingBandwidthBytes) / float64(allocation.TotalBandwidthBytes))
+	return roundTokenAmount(refund)
 }
 
 func (s *UserService) refreshUserSummaryTx(tx *gorm.DB, user *models.User) error {

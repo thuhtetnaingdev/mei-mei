@@ -17,6 +17,7 @@ func TestGenerateBuildsSingleUserShadowsocksInbounds(t *testing.T) {
 		"/tmp/tls.crt",
 		"/tmp/tls.key",
 		"92.113.148.36",
+		"",
 		[]string{"cdn.akamai.steamstatic.com"},
 		[]string{"https://www.cloudflare.com"},
 		[]User{

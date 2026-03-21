@@ -51,5 +51,6 @@ Notes:
 
 - The current scaffold is production-oriented and extensible.
 - Usage accounting hooks and bandwidth policy fields are included, but full traffic metering depends on your preferred telemetry pipeline.
+- Exact per-user traffic metering uses sing-box `experimental.v2ray_api.stats.users` counters through `SINGBOX_V2RAY_API_LISTEN`, which defaults to `127.0.0.1:10085` on freshly installed or re-synced nodes.
 - `node_backend` writes a generated `sing-box` JSON file and can execute a reload command without SSH.
 - Node registration requires a shared registration token plus a per-node API token.
