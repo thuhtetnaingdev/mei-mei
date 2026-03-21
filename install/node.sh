@@ -63,12 +63,40 @@ EOF
   return 1
 }
 
+install_managed_singbox() {
+  local singbox_asset_name
+  local singbox_download_url
+  local singbox_extract_dir
+  local singbox_folder
+
+  singbox_asset_name="singbox-v2ray-api-linux-${asset_arch}.tar.gz"
+  singbox_download_url="$(release_asset_url "${singbox_asset_name}")"
+  if [[ -z "$singbox_download_url" ]]; then
+    echo "failed to find release asset ${singbox_asset_name} for ${REPO}@${VERSION}" >&2
+    exit 1
+  fi
+
+  singbox_extract_dir="${tmp_dir}/singbox-${asset_arch}"
+  singbox_folder="${singbox_asset_name%.tar.gz}"
+  mkdir -p "${singbox_extract_dir}"
+
+  echo "installing managed sing-box binary from release asset"
+  curl -fsSL "$singbox_download_url" -o "${tmp_dir}/${singbox_asset_name}"
+  tar -xzf "${tmp_dir}/${singbox_asset_name}" -C "${singbox_extract_dir}"
+  sudo install -m 0755 "${singbox_extract_dir}/${singbox_folder}/sing-box" /usr/bin/sing-box
+}
+
 ensure_compatible_singbox() {
   if ! command -v sing-box >/dev/null 2>&1; then
     install_official_singbox
   elif ! singbox_supports_v2ray_api; then
     echo "existing sing-box build lacks v2ray_api support, reinstalling official package"
     install_official_singbox
+  fi
+
+  if ! singbox_supports_v2ray_api; then
+    echo "official sing-box package still lacks v2ray_api support, installing managed release binary"
+    install_managed_singbox
   fi
 
   if ! singbox_supports_v2ray_api; then
@@ -123,6 +151,7 @@ case "$arch" in
 esac
 
 asset_name="node_backend-linux-${asset_arch}.tar.gz"
+release_json=""
 
 github_release_api() {
   if [[ "$VERSION" == "latest" ]]; then
@@ -132,11 +161,19 @@ github_release_api() {
   fi
 }
 
-asset_url() {
-  curl -fsSL "$(github_release_api)" | grep '"browser_download_url"' | grep "${asset_name}" | head -n1 | sed -E 's/.*"([^"]+)".*/\1/'
+load_release_json() {
+  if [[ -z "$release_json" ]]; then
+    release_json="$(curl -fsSL "$(github_release_api)")"
+  fi
 }
 
-download_url="$(asset_url)"
+release_asset_url() {
+  local wanted_name="$1"
+  load_release_json
+  printf '%s' "$release_json" | grep '"browser_download_url"' | grep "${wanted_name}" | head -n1 | sed -E 's/.*"([^"]+)".*/\1/'
+}
+
+download_url="$(release_asset_url "${asset_name}")"
 if [[ -z "$download_url" ]]; then
   echo "failed to find release asset ${asset_name} for ${REPO}@${VERSION}" >&2
   exit 1
