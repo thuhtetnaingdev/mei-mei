@@ -115,6 +115,23 @@ func (s *ConfigService) Apply(req ApplyConfigRequest) error {
 	if err := s.ensureV2RayAPIEnvDefault(); err != nil {
 		log.Printf("[config-service] env sync warning: %v", err)
 	}
+	if err := s.validateSingboxConfig(); err != nil {
+		if fallbackPayload, fallbackErr := s.buildV2RayAPIFallbackPayload(req, users); fallbackErr == nil && fallbackPayload != nil {
+			log.Printf("[config-service] sing-box validation failed with v2ray api enabled, retrying without v2ray api: %v", err)
+			if writeErr := os.WriteFile(s.cfg.SingboxConfigPath, fallbackPayload, 0o644); writeErr != nil {
+				s.setError(writeErr.Error())
+				return writeErr
+			}
+			if validateErr := s.validateSingboxConfig(); validateErr != nil {
+				s.setError(validateErr.Error())
+				return validateErr
+			}
+			s.bandwidthTracker.DisableV2RayAPI()
+		} else {
+			s.setError(err.Error())
+			return err
+		}
+	}
 
 	if err := s.ensureFirewallPorts(req); err != nil {
 		log.Printf("[config-service] firewall sync warning: %v", err)
@@ -194,12 +211,10 @@ func (s *ConfigService) StartBandwidthMonitoring(ctx context.Context, interval t
 				log.Printf("[bandwidth-monitor] stopped")
 				return
 			case <-ticker.C:
-				if s.cfg.SingboxV2RayAPIListen == "" {
-					s.mu.RLock()
-					ports := append([]int(nil), s.activeListenPorts...)
-					s.mu.RUnlock()
-					tracker.UpdateConnectionCounts(ports...)
-				}
+				s.mu.RLock()
+				ports := append([]int(nil), s.activeListenPorts...)
+				s.mu.RUnlock()
+				tracker.UpdateConnectionCounts(ports...)
 				delta, duration, err := tracker.CollectUsage()
 				if err != nil {
 					log.Printf("[bandwidth-monitor] sample failed: %v", err)
@@ -216,6 +231,47 @@ func (s *ConfigService) StartBandwidthMonitoring(ctx context.Context, interval t
 func (s *ConfigService) reload() error {
 	cmd := exec.Command("sh", "-c", s.cfg.SingboxReloadCommand)
 	return cmd.Run()
+}
+
+func (s *ConfigService) validateSingboxConfig() error {
+	singboxPath, err := exec.LookPath("sing-box")
+	if err != nil {
+		return nil
+	}
+
+	cmd := exec.Command(singboxPath, "check", "-c", s.cfg.SingboxConfigPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		return fmt.Errorf("sing-box config validation failed: %s", message)
+	}
+	return nil
+}
+
+func (s *ConfigService) buildV2RayAPIFallbackPayload(req ApplyConfigRequest, users []singbox.User) ([]byte, error) {
+	if strings.TrimSpace(s.cfg.SingboxV2RayAPIListen) == "" {
+		return nil, nil
+	}
+
+	return singbox.Generate(
+		s.cfg.NodeName,
+		s.cfg.PublicHost,
+		s.cfg.VLESSRealityPrivateKey,
+		s.cfg.VLESSRealityServerName,
+		s.cfg.VLESSRealityShortID,
+		s.cfg.VLESSRealityHandshakeServer,
+		s.cfg.VLESSRealityHandshakePort,
+		s.cfg.TLSCertificatePath,
+		s.cfg.TLSKeyPath,
+		s.cfg.TLSServerName,
+		"",
+		req.RealitySNIs,
+		req.Hysteria2Masquerades,
+		users,
+	)
 }
 
 func (s *ConfigService) ensureFirewallPorts(req ApplyConfigRequest) error {

@@ -213,9 +213,18 @@ func getConnectionCountsByPort(ports ...int) map[string]int {
 // CollectUsage reads a new sample and accrues the delta into the current period.
 func (t *BandwidthTracker) CollectUsage() (int64, time.Duration, error) {
 	if t.apiAddress != "" {
-		return t.collectUsageFromV2RayAPI()
+		delta, duration, err := t.collectUsageFromV2RayAPI()
+		if err == nil {
+			return delta, duration, nil
+		}
+
+		t.DisableV2RayAPI()
 	}
 
+	return t.collectUsageFromInterfaces()
+}
+
+func (t *BandwidthTracker) collectUsageFromInterfaces() (int64, time.Duration, error) {
 	currentSample, err := readBandwidthSample()
 	if err != nil {
 		return 0, 0, err
@@ -416,6 +425,12 @@ func (t *BandwidthTracker) GetStatus() map[string]interface{} {
 	}
 }
 
+func (t *BandwidthTracker) DisableV2RayAPI() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.apiAddress = ""
+}
+
 func parseV2RayUserTrafficStat(name string, value int64) (string, int64, bool) {
 	if !strings.HasPrefix(name, "user>>>") {
 		return "", 0, false
@@ -540,17 +555,61 @@ func isUUID(s string) bool {
 
 // getActiveConnections attempts to get active connections using ss command
 func getActiveConnections(port int) (int, error) {
-	cmd := exec.Command("ss", "-tn", fmt.Sprintf("dport = :%d", port))
+	countTCP, tcpErr := countConnectionsForPort("tcp", port)
+	countUDP, udpErr := countConnectionsForPort("udp", port)
+
+	switch {
+	case tcpErr != nil && udpErr != nil:
+		return 0, tcpErr
+	case tcpErr != nil:
+		return countUDP, nil
+	case udpErr != nil:
+		return countTCP, nil
+	default:
+		return countTCP + countUDP, nil
+	}
+}
+
+func countConnectionsForPort(network string, port int) (int, error) {
+	if port <= 0 {
+		return 0, nil
+	}
+
+	args := []string{"-H"}
+	switch network {
+	case "tcp":
+		args = append(args, "-tn")
+	case "udp":
+		args = append(args, "-un")
+	default:
+		return 0, fmt.Errorf("unsupported network %q", network)
+	}
+
+	cmd := exec.Command("ss", args...)
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, err
 	}
 
-	lines := strings.Split(string(output), "\n")
-	// Subtract 1 for header line
-	count := len(lines) - 1
-	if count < 0 {
-		count = 0
+	trimmed := strings.TrimSpace(string(output))
+	if trimmed == "" {
+		return 0, nil
+	}
+
+	count := 0
+	suffix := ":" + strconv.Itoa(port)
+	for _, line := range strings.Split(trimmed, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 5 {
+			continue
+		}
+
+		localAddress := fields[3]
+		if !strings.HasSuffix(localAddress, suffix) {
+			continue
+		}
+
+		count++
 	}
 
 	return count, nil

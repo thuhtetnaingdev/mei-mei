@@ -24,6 +24,59 @@ need_cmd systemctl
 need_cmd mktemp
 need_cmd openssl
 
+install_official_singbox() {
+  echo "installing official sing-box package"
+  curl -fsSL https://sing-box.app/install.sh | sudo sh
+}
+
+singbox_supports_v2ray_api() {
+  if ! command -v sing-box >/dev/null 2>&1; then
+    return 1
+  fi
+
+  local check_file
+  check_file="$(mktemp)"
+  cat >"$check_file" <<'EOF'
+{
+  "log": { "level": "warn" },
+  "inbounds": [],
+  "outbounds": [{ "type": "direct", "tag": "direct" }],
+  "route": { "final": "direct" },
+  "experimental": {
+    "v2ray_api": {
+      "listen": "127.0.0.1:10085",
+      "stats": {
+        "enabled": true,
+        "users": ["healthcheck@example.com"]
+      }
+    }
+  }
+}
+EOF
+
+  if sing-box check -c "$check_file" >/dev/null 2>&1; then
+    rm -f "$check_file"
+    return 0
+  fi
+
+  rm -f "$check_file"
+  return 1
+}
+
+ensure_compatible_singbox() {
+  if ! command -v sing-box >/dev/null 2>&1; then
+    install_official_singbox
+  elif ! singbox_supports_v2ray_api; then
+    echo "existing sing-box build lacks v2ray_api support, reinstalling official package"
+    install_official_singbox
+  fi
+
+  if ! singbox_supports_v2ray_api; then
+    echo "installed sing-box still lacks v2ray_api support" >&2
+    exit 1
+  fi
+}
+
 if [[ -z "$CONTROL_PLANE_TOKEN" ]]; then
   echo "MEIMEI_CONTROL_PLANE_TOKEN is required" >&2
   exit 1
@@ -94,9 +147,7 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 curl -fsSL "$download_url" -o "$tmp_dir/node_backend.tar.gz"
 
-if ! command -v sing-box >/dev/null 2>&1; then
-  curl -fsSL https://sing-box.app/install.sh | sudo sh
-fi
+ensure_compatible_singbox
 
 pair_output="$(sing-box generate reality-keypair 2>/dev/null || true)"
 reality_private_key="$(printf '%s\n' "$pair_output" | sed -n 's/^PrivateKey:[[:space:]]*//p')"
