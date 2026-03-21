@@ -14,6 +14,7 @@ interface SubscriptionResponse {
   subscription: string;
   url: string;
   remoteProfileUrl: string;
+  clashProfileUrl: string;
   singboxImportUrl: string;
   nodeLinks: Array<{
     nodeName: string;
@@ -655,6 +656,13 @@ export function UsersPage() {
           value: selectedAccess.remoteProfileUrl,
           emptyMessage: "This backend is not returning a JSON profile URL yet.",
           copyLabel: "Copy JSON URL"
+        },
+        {
+          key: "clash",
+          label: "Clash Profile URL",
+          value: selectedAccess.clashProfileUrl,
+          emptyMessage: "This backend is not returning a Clash profile URL yet.",
+          copyLabel: "Copy Clash URL"
         },
         {
           key: "import",

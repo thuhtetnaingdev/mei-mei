@@ -4,9 +4,21 @@ import (
 	"encoding/json"
 	"panel_backend/internal/models"
 	"panel_backend/internal/services"
+
+	"gopkg.in/yaml.v3"
 )
 
 func GenerateSingboxProfile(user models.User, nodes []models.Node, settings services.ProtocolSettings) ([]byte, error) {
+	config := buildSingboxProfileConfig(user, nodes, settings)
+	return json.MarshalIndent(config, "", "  ")
+}
+
+func GenerateClashProfile(user models.User, nodes []models.Node, settings services.ProtocolSettings) ([]byte, error) {
+	config := buildSingboxProfileConfig(user, nodes, settings)
+	return yaml.Marshal(config)
+}
+
+func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings services.ProtocolSettings) map[string]interface{} {
 	availableNodes := filterAvailableNodes(nodes)
 	proxyOutbounds := collectOutboundTags(user, availableNodes, settings)
 	urltestOutbounds := collectOutboundTags(user, availableNodes, settings)
@@ -122,7 +134,7 @@ func GenerateSingboxProfile(user models.User, nodes []models.Node, settings serv
 
 	}
 
-	config := map[string]interface{}{
+	return map[string]interface{}{
 		"inbounds": []map[string]interface{}{
 			{
 				"type":                     "tun",
@@ -163,8 +175,6 @@ func GenerateSingboxProfile(user models.User, nodes []models.Node, settings serv
 			},
 		},
 	}
-
-	return json.MarshalIndent(config, "", "  ")
 }
 
 func collectOutboundTags(user models.User, nodes []models.Node, settings services.ProtocolSettings) []string {

@@ -723,6 +723,7 @@ func (h *Handler) getSubscription(c *gin.Context) {
 	}
 
 	remoteProfileURL := h.cfg.BasePublicURL + "/profiles/singbox/" + user.UUID
+	clashProfileURL := remoteProfileURL + "?format=clash"
 	importURL := "sing-box://import-remote-profile?url=" + url.QueryEscape(remoteProfileURL) + "&name=" + url.QueryEscape(user.Email)
 	protocolSettings, err := h.adminService.GetProtocolSettings()
 	if err != nil {
@@ -737,6 +738,7 @@ func (h *Handler) getSubscription(c *gin.Context) {
 		"nodeLinks":        subscription.GenerateNodeLinks(*user, nodes, protocolSettings),
 		"url":              h.cfg.BaseSubscriptionURL + "/" + c.Param("userId"),
 		"remoteProfileUrl": remoteProfileURL,
+		"clashProfileUrl":  clashProfileURL,
 		"singboxImportUrl": importURL,
 	})
 }
@@ -757,6 +759,17 @@ func (h *Handler) getSingboxProfile(c *gin.Context) {
 	protocolSettings, err := h.adminService.GetProtocolSettings()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if strings.EqualFold(c.Query("format"), "clash") {
+		profile, err := subscription.GenerateClashProfile(*user, nodes, protocolSettings)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.Data(http.StatusOK, "text/plain; charset=utf-8", profile)
 		return
 	}
 
