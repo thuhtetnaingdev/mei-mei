@@ -8,6 +8,7 @@ import (
 
 	"panel_backend/internal/models"
 	"panel_backend/internal/services"
+	"gopkg.in/yaml.v3"
 )
 
 func TestGenerateNodeLinksIncludesUserSpecificShadowsocksLink(t *testing.T) {
@@ -83,4 +84,37 @@ func TestGenerateSingboxProfileIncludesMatchingShadowsocksOutbound(t *testing.T)
 	}
 
 	t.Fatal("expected shadowsocks outbound to be present in sing-box profile")
+}
+
+func TestGenerateClashProfileUsesDisableSNIForTUICIPHosts(t *testing.T) {
+	user := models.User{ID: 1, UUID: "user-1", Email: "one@example.com", Enabled: true}
+	node := models.Node{Name: "webdock", PublicHost: "92.113.148.36", Enabled: true}
+
+	payload, err := GenerateClashProfile(user, []models.Node{node}, services.ProtocolSettings{})
+	if err != nil {
+		t.Fatalf("GenerateClashProfile() error = %v", err)
+	}
+
+	var profile struct {
+		Proxies []map[string]interface{} `yaml:"proxies"`
+	}
+	if err := yaml.Unmarshal(payload, &profile); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	for _, proxy := range profile.Proxies {
+		if proxy["type"] != "tuic" {
+			continue
+		}
+
+		if proxy["sni"] != nil {
+			t.Fatalf("expected TUIC proxy to omit sni for IP hosts, got %v", proxy["sni"])
+		}
+		if proxy["disable-sni"] != true {
+			t.Fatalf("expected TUIC proxy to set disable-sni=true, got %v", proxy["disable-sni"])
+		}
+		return
+	}
+
+	t.Fatal("expected TUIC proxy to be present in clash profile")
 }

@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"encoding/json"
+	"net"
 	"panel_backend/internal/models"
 	"panel_backend/internal/services"
 
@@ -210,8 +211,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 
 		if plan.TUIC.Port > 0 {
 			name := plan.TUIC.Tag
-			proxyNames = append(proxyNames, name)
-			proxies = append(proxies, map[string]interface{}{
+			tuicProxy := map[string]interface{}{
 				"name":                  name,
 				"type":                  "tuic",
 				"server":                node.PublicHost,
@@ -219,10 +219,16 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 				"uuid":                  user.UUID,
 				"password":              user.UUID,
 				"udp":                   true,
-				"sni":                   node.PublicHost,
 				"skip-cert-verify":      true,
 				"congestion-controller": "bbr",
-			})
+			}
+			if net.ParseIP(node.PublicHost) != nil {
+				tuicProxy["disable-sni"] = true
+			} else {
+				tuicProxy["sni"] = node.PublicHost
+			}
+			proxyNames = append(proxyNames, name)
+			proxies = append(proxies, tuicProxy)
 		}
 
 		shadowsocks := buildShadowsocksVariant(node, user)
