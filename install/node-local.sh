@@ -17,6 +17,7 @@ PUBLIC_HOST="${MEIMEI_PUBLIC_HOST:-}"
 NODE_TOKEN="${MEIMEI_NODE_TOKEN:-}"
 CONTROL_PLANE_TOKEN="${MEIMEI_CONTROL_PLANE_TOKEN:-}"
 SINGBOX_V2RAY_API_LISTEN="${MEIMEI_SINGBOX_V2RAY_API_LISTEN:-127.0.0.1:10085}"
+PANEL_ENV_PATH="${REPO_ROOT}/panel_backend/.env"
 
 usage() {
   cat <<'EOF'
@@ -62,6 +63,23 @@ need_cmd() {
     echo "missing required command: $1" >&2
     exit 1
   }
+}
+
+load_control_plane_token_from_panel_env() {
+  if [[ -n "${CONTROL_PLANE_TOKEN}" ]]; then
+    return
+  fi
+  if [[ ! -f "${PANEL_ENV_PATH}" ]]; then
+    return
+  fi
+
+  local line
+  line="$(grep '^NODE_SHARED_TOKEN=' "${PANEL_ENV_PATH}" 2>/dev/null | tail -n1 || true)"
+  if [[ -z "${line}" ]]; then
+    return
+  fi
+
+  CONTROL_PLANE_TOKEN="${line#NODE_SHARED_TOKEN=}"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -137,6 +155,13 @@ fi
 
 if [[ -z "${PUBLIC_HOST}" ]]; then
   PUBLIC_HOST="${SSH_HOST}"
+fi
+
+load_control_plane_token_from_panel_env
+if [[ -z "${CONTROL_PLANE_TOKEN}" ]]; then
+  echo "control plane shared token is required" >&2
+  echo "Set MEIMEI_CONTROL_PLANE_TOKEN or add NODE_SHARED_TOKEN to ${PANEL_ENV_PATH}" >&2
+  exit 1
 fi
 
 need_cmd ssh
@@ -243,21 +268,52 @@ need_cmd mktemp
 need_cmd openssl
 need_cmd curl
 
+existing_env_path="${INSTALL_DIR}/.env"
+
+read_existing_env() {
+  local key="$1"
+  if [[ ! -f "${existing_env_path}" ]]; then
+    return
+  fi
+
+  local line
+  line="$(sudo grep "^${key}=" "${existing_env_path}" 2>/dev/null | tail -n1 || true)"
+  if [[ -z "${line}" ]]; then
+    return
+  fi
+
+  printf '%s' "${line#*=}"
+}
+
 if [[ ! -f "${LOCAL_TARBALL}" ]]; then
   echo "uploaded tarball not found: ${LOCAL_TARBALL}" >&2
   exit 1
 fi
 
 if [[ -z "${NODE_NAME}" ]]; then
+  NODE_NAME="$(read_existing_env NODE_NAME)"
+fi
+if [[ -z "${NODE_NAME}" ]]; then
   NODE_NAME="$(hostname)"
 fi
 
+if [[ -z "${PUBLIC_HOST}" ]]; then
+  PUBLIC_HOST="$(read_existing_env PUBLIC_HOST)"
+fi
 if [[ -z "${PUBLIC_HOST}" ]]; then
   PUBLIC_HOST="$(curl -fsSL --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
 fi
 
 if [[ -z "${NODE_TOKEN}" ]]; then
+  NODE_TOKEN="$(read_existing_env NODE_TOKEN)"
+fi
+if [[ -z "${NODE_TOKEN}" ]]; then
   NODE_TOKEN="$(openssl rand -hex 16)"
+fi
+
+existing_control_plane_token="$(read_existing_env CONTROL_PLANE_SHARED_TOKEN)"
+if [[ -z "${CONTROL_PLANE_TOKEN}" && -n "${existing_control_plane_token}" ]]; then
+  CONTROL_PLANE_TOKEN="${existing_control_plane_token}"
 fi
 
 kill_port_processes() {
@@ -336,30 +392,54 @@ ensure_compatible_singbox() {
 }
 
 ensure_compatible_singbox
-
-pair_output="$(sing-box generate reality-keypair 2>/dev/null || true)"
-reality_private_key="$(printf '%s\n' "${pair_output}" | sed -n 's/^PrivateKey:[[:space:]]*//p')"
-reality_public_key="$(printf '%s\n' "${pair_output}" | sed -n 's/^PublicKey:[[:space:]]*//p')"
+reality_private_key="$(read_existing_env VLESS_REALITY_PRIVATE_KEY)"
+reality_public_key="$(read_existing_env VLESS_REALITY_PUBLIC_KEY)"
 if [[ -z "${reality_private_key}" || -z "${reality_public_key}" ]]; then
-  echo "failed to generate sing-box reality keypair" >&2
-  exit 1
+  pair_output="$(sing-box generate reality-keypair 2>/dev/null || true)"
+  reality_private_key="$(printf '%s\n' "${pair_output}" | sed -n 's/^PrivateKey:[[:space:]]*//p')"
+  reality_public_key="$(printf '%s\n' "${pair_output}" | sed -n 's/^PublicKey:[[:space:]]*//p')"
+  if [[ -z "${reality_private_key}" || -z "${reality_public_key}" ]]; then
+    echo "failed to generate sing-box reality keypair" >&2
+    exit 1
+  fi
 fi
-reality_short_id="$(openssl rand -hex 4)"
+reality_short_id="$(read_existing_env VLESS_REALITY_SHORT_ID)"
+if [[ -z "${reality_short_id}" ]]; then
+  reality_short_id="$(openssl rand -hex 4)"
+fi
+reality_server_name="$(read_existing_env VLESS_REALITY_SERVER_NAME)"
+if [[ -z "${reality_server_name}" ]]; then
+  reality_server_name="www.cloudflare.com"
+fi
+reality_handshake_server="$(read_existing_env VLESS_REALITY_HANDSHAKE_SERVER)"
+if [[ -z "${reality_handshake_server}" ]]; then
+  reality_handshake_server="www.cloudflare.com"
+fi
+reality_handshake_port="$(read_existing_env VLESS_REALITY_HANDSHAKE_PORT)"
+if [[ -z "${reality_handshake_port}" ]]; then
+  reality_handshake_port="443"
+fi
+tls_server_name="$(read_existing_env TLS_SERVER_NAME)"
+if [[ -z "${tls_server_name}" ]]; then
+  tls_server_name="${PUBLIC_HOST}"
+fi
 
 extract_dir="$(mktemp -d)"
 trap 'rm -rf "${extract_dir}"' EXIT
 
-tar -xzf "${LOCAL_TARBALL}" -C "${extract_dir}"
-tar_root="$(tar -tzf "${LOCAL_TARBALL}" | head -n1 | cut -d/ -f1)"
-if [[ -z "${tar_root}" || ! -d "${extract_dir}/${tar_root}" ]]; then
-  echo "failed to determine extracted tarball root" >&2
+tar -xzf "${LOCAL_TARBALL}" -C "${extract_dir}" 2> >(grep -v "LIBARCHIVE.xattr.com.apple.provenance" >&2 || true)
+
+extracted_binary="$(find "${extract_dir}" -maxdepth 3 -type f -name node_backend | head -n1)"
+if [[ -z "${extracted_binary}" || ! -f "${extracted_binary}" ]]; then
+  echo "failed to locate node_backend binary in extracted tarball" >&2
   exit 1
 fi
+tar_root="$(dirname "${extracted_binary}")"
 
 sudo mkdir -p "${INSTALL_DIR}"
-sudo install -m 0755 "${extract_dir}/${tar_root}/node_backend" "${INSTALL_DIR}/node_backend"
-if [[ -f "${extract_dir}/${tar_root}/.env.example" ]]; then
-  sudo install -m 0644 "${extract_dir}/${tar_root}/.env.example" "${INSTALL_DIR}/.env.example"
+sudo install -m 0755 "${tar_root}/node_backend" "${INSTALL_DIR}/node_backend"
+if [[ -f "${tar_root}/.env.example" ]]; then
+  sudo install -m 0644 "${tar_root}/.env.example" "${INSTALL_DIR}/.env.example"
 fi
 
 if [[ ! -f "${INSTALL_DIR}/tls.key" || ! -f "${INSTALL_DIR}/tls.crt" ]]; then
@@ -399,12 +479,12 @@ PUBLIC_HOST=${PUBLIC_HOST}
 VLESS_REALITY_PRIVATE_KEY=${reality_private_key}
 VLESS_REALITY_PUBLIC_KEY=${reality_public_key}
 VLESS_REALITY_SHORT_ID=${reality_short_id}
-VLESS_REALITY_SERVER_NAME=www.cloudflare.com
-VLESS_REALITY_HANDSHAKE_SERVER=www.cloudflare.com
-VLESS_REALITY_HANDSHAKE_PORT=443
+VLESS_REALITY_SERVER_NAME=${reality_server_name}
+VLESS_REALITY_HANDSHAKE_SERVER=${reality_handshake_server}
+VLESS_REALITY_HANDSHAKE_PORT=${reality_handshake_port}
 TLS_CERTIFICATE_PATH=${INSTALL_DIR}/tls.crt
 TLS_KEY_PATH=${INSTALL_DIR}/tls.key
-TLS_SERVER_NAME=${PUBLIC_HOST}
+TLS_SERVER_NAME=${tls_server_name}
 EOF
 
 sudo tee /etc/systemd/system/meimei-node.service >/dev/null <<EOF

@@ -282,7 +282,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		"mode":       "rule",
 		"log-level":  "info",
 		"ipv6":       true,
-		"proxies":    proxies,
+		"proxies": proxies,
 		"proxy-groups": []map[string]interface{}{
 			{
 				"name":      "AUTO",

@@ -73,6 +73,12 @@ export interface Node {
   bandwidthUsedBytes: number;
   rewardedTokens: number;
   healthStatus: string;
+  syncVerificationStatus: string;
+  syncVerificationError: string;
+  syncVerifiedAt?: string | null;
+  lastAppliedConfigHash: string;
+  appliedUserCount: number;
+  lastConfigAppliedAt?: string | null;
   singboxVersion: string;
   lastHeartbeat?: string | null;
   lastSyncAt?: string | null;

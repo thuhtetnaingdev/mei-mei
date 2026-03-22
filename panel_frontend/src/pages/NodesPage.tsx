@@ -18,6 +18,21 @@ interface NodeDiagnosticsResponse {
   results: NodeDiagnosticResult[];
 }
 
+interface SyncNodeResult {
+  node: string;
+  status: string;
+  error?: string;
+  verificationStatus?: string;
+  verificationError?: string;
+  expectedUserCount?: number;
+  appliedUserCount?: number;
+}
+
+interface SyncNodesResponse {
+  syncedUsers: number;
+  results: SyncNodeResult[];
+}
+
 const emptyBootstrapForm = {
   name: "",
   ip: "",
@@ -132,8 +147,17 @@ export function NodesPage() {
   };
 
   const syncNodes = async () => {
-    await api.post("/nodes/sync");
-    setNodeActionStatus("Triggered full node sync.");
+    const response = await api.post<SyncNodesResponse>("/nodes/sync");
+    const failedNodes = (response.data.results ?? []).filter((result) => result.status !== "success");
+    if (failedNodes.length > 0) {
+      setNodeActionStatus(
+        failedNodes
+          .map((result) => `${result.node}: ${result.verificationError || result.error || "sync failed"}`)
+          .join("; ")
+      );
+    } else {
+      setNodeActionStatus(`Verified sync on ${response.data.results?.length ?? 0} nodes.`);
+    }
     await loadNodes();
   };
 
@@ -321,6 +345,7 @@ export function NodesPage() {
   const offlineNodes = nodes.filter((node) => node.healthStatus === "offline").length;
   const enabledNodes = nodes.filter((node) => node.enabled).length;
   const disabledNodes = nodes.filter((node) => !node.enabled).length;
+  const verifiedNodes = nodes.filter((node) => node.syncVerificationStatus === "verified").length;
   const healthyDiagnostics = diagnostics.filter((entry) => entry.qualityStatus === "healthy").length;
   const degradedDiagnostics = diagnostics.filter((entry) => entry.qualityStatus === "degraded").length;
   const offlineDiagnostics = diagnostics.filter((entry) => entry.qualityStatus === "offline").length;
@@ -386,9 +411,9 @@ export function NodesPage() {
               <p className="mt-1 text-xs text-slate-500">Included in user access</p>
             </div>
             <div className="panel-subtle p-3">
-              <p className="metric-kicker">Attention</p>
-              <p className="mt-2 font-display text-2xl font-bold text-amber-200">{offlineNodes + disabledNodes}</p>
-              <p className="mt-1 text-xs text-slate-500">Offline or intentionally paused</p>
+              <p className="metric-kicker">Verified Sync</p>
+              <p className="mt-2 font-display text-2xl font-bold text-emerald-300">{verifiedNodes}</p>
+              <p className="mt-1 text-xs text-slate-500">Nodes with confirmed applied config</p>
             </div>
           </div>
         </SectionCard>
@@ -592,10 +617,33 @@ export function NodesPage() {
                                 testable
                               </span>
                             ) : null}
+                            <span className={`status-pill ${
+                              node.syncVerificationStatus === "verified"
+                                ? "text-emerald-300"
+                                : node.syncVerificationStatus === "mismatch"
+                                  ? "text-amber-200"
+                                  : node.syncVerificationStatus === "error"
+                                    ? "text-rose-300"
+                                    : "text-slate-400"
+                            }`}>
+                              <span className={`h-2 w-2 rounded-full ${
+                                node.syncVerificationStatus === "verified"
+                                  ? "bg-emerald-400"
+                                  : node.syncVerificationStatus === "mismatch"
+                                    ? "bg-amber-300"
+                                    : node.syncVerificationStatus === "error"
+                                      ? "bg-rose-400"
+                                      : "bg-slate-500"
+                              }`} />
+                              {node.syncVerificationStatus || "unknown"}
+                            </span>
                           </div>
                           <p className="mt-1 text-sm text-slate-400">
                             {node.location || "Unknown region"} • {node.publicHost || "No public host"}
                           </p>
+                          {node.syncVerificationError ? (
+                            <p className="mt-1 text-xs text-amber-200">{node.syncVerificationError}</p>
+                          ) : null}
                         </div>
 
                         <div className="flex flex-wrap gap-2">
@@ -633,7 +681,7 @@ export function NodesPage() {
                         </div>
                       </div>
 
-                      <dl className="grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-5">
+                      <dl className="grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-6">
                         <div className="rounded-[20px] border border-white/10 bg-slate-950/28 px-3 py-3">
                           <dt className="metric-kicker">API</dt>
                           <dd className="mt-2 break-all text-slate-200">{node.baseUrl}</dd>
@@ -649,6 +697,11 @@ export function NodesPage() {
                         <div className="rounded-[20px] border border-white/10 bg-slate-950/28 px-3 py-3">
                           <dt className="metric-kicker">Last Sync</dt>
                           <dd className="mt-2 text-slate-200">{formatCompactDateTime(node.lastSyncAt)}</dd>
+                        </div>
+                        <div className="rounded-[20px] border border-white/10 bg-slate-950/28 px-3 py-3">
+                          <dt className="metric-kicker">Verified</dt>
+                          <dd className="mt-2 text-slate-200">{formatCompactDateTime(node.syncVerifiedAt)}</dd>
+                          <p className="mt-1 text-xs text-slate-500">{node.appliedUserCount ?? 0} applied users</p>
                         </div>
                         <div className="rounded-[20px] border border-white/10 bg-slate-950/28 px-3 py-3">
                           <dt className="metric-kicker">Expires</dt>

@@ -2,6 +2,8 @@ package services
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -91,6 +93,19 @@ type SyncPayloadWithLimits struct {
 	RealitySNIs          []string   `json:"realitySnis"`
 	Hysteria2Masquerades []string   `json:"hysteria2Masquerades"`
 	Users                []SyncUser `json:"users"`
+}
+
+type nodeSyncVerificationResult struct {
+	ExpectedConfigHash string
+	AppliedConfigHash  string
+	ExpectedUserCount  int
+	AppliedUserCount   int
+	RealityPublicKey   string
+	RealityShortID     string
+	RealityServerName  string
+	Status             string
+	Error              string
+	VerifiedAt         time.Time
 }
 
 type BootstrapJob struct {
@@ -481,11 +496,21 @@ func (s *NodeService) SyncAllUsers(users []models.User) ([]map[string]interface{
 			result["mode"] = "disabled"
 		}
 
-		err := s.syncNode(node, usersToSync)
+		verification, err := s.syncNode(node, usersToSync)
 		if err != nil {
 			result["status"] = "failed"
 			result["error"] = err.Error()
-		} else {
+		}
+		if verification != nil {
+			result["verificationStatus"] = verification.Status
+			result["verificationError"] = verification.Error
+			result["expectedUserCount"] = verification.ExpectedUserCount
+			result["appliedUserCount"] = verification.AppliedUserCount
+			result["expectedConfigHash"] = verification.ExpectedConfigHash
+			result["appliedConfigHash"] = verification.AppliedConfigHash
+			result["verifiedAt"] = verification.VerifiedAt
+		}
+		if err == nil {
 			now := time.Now()
 			_ = s.db.Model(&node).Updates(map[string]interface{}{
 				"last_sync_at":   &now,
@@ -514,7 +539,7 @@ func (s *NodeService) syncNodeEnabledState(node *models.Node) error {
 		usersToSync = activeUsers
 	}
 
-	if err := s.syncNode(*node, usersToSync); err != nil {
+	if _, err := s.syncNode(*node, usersToSync); err != nil {
 		return err
 	}
 
@@ -539,7 +564,7 @@ func (s *NodeService) syncNodeEnabledState(node *models.Node) error {
 	return nil
 }
 
-func (s *NodeService) syncNode(node models.Node, users []models.User) error {
+func (s *NodeService) syncNode(node models.Node, users []models.User) (*nodeSyncVerificationResult, error) {
 	syncUsers := make([]SyncUser, 0, len(users))
 	for _, user := range users {
 		if user.IsTesting && !node.IsTestable {
@@ -556,7 +581,7 @@ func (s *NodeService) syncNode(node models.Node, users []models.User) error {
 
 	protocolSettings, err := loadProtocolSettings(s.db)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	payload := SyncPayloadWithLimits{
@@ -568,12 +593,14 @@ func (s *NodeService) syncNode(node models.Node, users []models.User) error {
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	expectedConfigHash := hashSyncPayload(payload)
+	expectedUserCount := countEnabledSyncUsers(syncUsers)
 
 	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/apply-config", node.BaseURL), bytes.NewReader(body))
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -582,24 +609,50 @@ func (s *NodeService) syncNode(node models.Node, users []models.User) error {
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return err
+		verification := &nodeSyncVerificationResult{
+			ExpectedConfigHash: expectedConfigHash,
+			ExpectedUserCount:  expectedUserCount,
+			Status:             "error",
+			Error:              err.Error(),
+			VerifiedAt:         time.Now(),
+		}
+		s.persistNodeSyncVerification(node.ID, verification, false)
+		return verification, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("node returned status %d", resp.StatusCode)
+		err = fmt.Errorf("node returned status %d", resp.StatusCode)
+		verification := &nodeSyncVerificationResult{
+			ExpectedConfigHash: expectedConfigHash,
+			ExpectedUserCount:  expectedUserCount,
+			Status:             "error",
+			Error:              err.Error(),
+			VerifiedAt:         time.Now(),
+		}
+		s.persistNodeSyncVerification(node.ID, verification, false)
+		return verification, err
 	}
 
-	return nil
+	verification, err := s.verifyNodeSync(node, expectedConfigHash, expectedUserCount)
+	if verification != nil {
+		s.persistNodeSyncVerification(node.ID, verification, true)
+	}
+	return verification, err
 }
 
 type nodeStatusResponse struct {
-	Status             string    `json:"status"`
-	LastReload         time.Time `json:"lastReload"`
-	BandwidthUsedBytes int64     `json:"bandwidthUsedBytes"`
-	RealityPublicKey   string    `json:"realityPublicKey"`
-	RealityShortID     string    `json:"realityShortId"`
-	RealityServerName  string    `json:"realityServerName"`
+	Status                 string     `json:"status"`
+	LastReload             time.Time  `json:"lastReload"`
+	BandwidthUsedBytes     int64      `json:"bandwidthUsedBytes"`
+	RealityPublicKey       string     `json:"realityPublicKey"`
+	RealityShortID         string     `json:"realityShortId"`
+	RealityServerName      string     `json:"realityServerName"`
+	LastAppliedConfigHash  string     `json:"lastAppliedConfigHash"`
+	AppliedUserCount       int        `json:"appliedUserCount"`
+	SyncVerificationStatus string     `json:"syncVerificationStatus"`
+	SyncVerificationError  string     `json:"syncVerificationError"`
+	SyncVerificationAt     *time.Time `json:"syncVerificationAt"`
 }
 
 func (s *NodeService) refreshNodeRuntimeStatus(node *models.Node) {
@@ -635,10 +688,16 @@ func (s *NodeService) refreshNodeRuntimeStatus(node *models.Node) {
 	node.LastHeartbeat = &now
 	node.BandwidthUsedBytes = status.BandwidthUsedBytes
 	updates := map[string]interface{}{
-		"health_status":        "online",
-		"last_heartbeat":       &now,
-		"bandwidth_used_bytes": status.BandwidthUsedBytes,
+		"health_status":            "online",
+		"last_heartbeat":           &now,
+		"bandwidth_used_bytes":     status.BandwidthUsedBytes,
+		"last_applied_config_hash": status.LastAppliedConfigHash,
+		"applied_user_count":       status.AppliedUserCount,
+		"last_config_applied_at":   status.SyncVerificationAt,
 	}
+	node.LastAppliedConfigHash = status.LastAppliedConfigHash
+	node.AppliedUserCount = status.AppliedUserCount
+	node.LastConfigAppliedAt = status.SyncVerificationAt
 
 	if status.RealityPublicKey != "" && status.RealityShortID != "" {
 		node.RealityPublicKey = status.RealityPublicKey
@@ -657,6 +716,127 @@ func (s *NodeService) refreshNodeRuntimeStatus(node *models.Node) {
 func (s *NodeService) markNodeOffline(node *models.Node) {
 	node.HealthStatus = "offline"
 	_ = s.db.Model(node).Update("health_status", "offline").Error
+}
+
+func (s *NodeService) verifyNodeSync(node models.Node, expectedConfigHash string, expectedUserCount int) (*nodeSyncVerificationResult, error) {
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/status", node.BaseURL), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		verification := &nodeSyncVerificationResult{
+			ExpectedConfigHash: expectedConfigHash,
+			ExpectedUserCount:  expectedUserCount,
+			Status:             "error",
+			Error:              err.Error(),
+			VerifiedAt:         time.Now(),
+		}
+		return verification, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		err = fmt.Errorf("node status returned %d", resp.StatusCode)
+		verification := &nodeSyncVerificationResult{
+			ExpectedConfigHash: expectedConfigHash,
+			ExpectedUserCount:  expectedUserCount,
+			Status:             "error",
+			Error:              err.Error(),
+			VerifiedAt:         time.Now(),
+		}
+		return verification, err
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var status nodeStatusResponse
+	if err := json.Unmarshal(body, &status); err != nil {
+		return nil, err
+	}
+
+	verification := &nodeSyncVerificationResult{
+		ExpectedConfigHash: expectedConfigHash,
+		AppliedConfigHash:  status.LastAppliedConfigHash,
+		ExpectedUserCount:  expectedUserCount,
+		AppliedUserCount:   status.AppliedUserCount,
+		RealityPublicKey:   status.RealityPublicKey,
+		RealityShortID:     status.RealityShortID,
+		RealityServerName:  status.RealityServerName,
+		VerifiedAt:         time.Now(),
+	}
+
+	switch {
+	case status.SyncVerificationStatus == "error":
+		verification.Status = "error"
+		verification.Error = strings.TrimSpace(status.SyncVerificationError)
+		if verification.Error == "" {
+			verification.Error = "node reported config apply error"
+		}
+		return verification, errors.New(verification.Error)
+	case status.LastAppliedConfigHash != expectedConfigHash:
+		verification.Status = "mismatch"
+		verification.Error = fmt.Sprintf("config hash mismatch: expected %s got %s", expectedConfigHash, status.LastAppliedConfigHash)
+		return verification, errors.New(verification.Error)
+	case status.AppliedUserCount != expectedUserCount:
+		verification.Status = "mismatch"
+		verification.Error = fmt.Sprintf("applied user count mismatch: expected %d got %d", expectedUserCount, status.AppliedUserCount)
+		return verification, errors.New(verification.Error)
+	default:
+		verification.Status = "verified"
+		return verification, nil
+	}
+}
+
+func (s *NodeService) persistNodeSyncVerification(nodeID uint, verification *nodeSyncVerificationResult, nodeReachable bool) {
+	if verification == nil || nodeID == 0 {
+		return
+	}
+
+	updates := map[string]interface{}{
+		"sync_verification_status": verification.Status,
+		"sync_verification_error":  verification.Error,
+		"sync_verified_at":         &verification.VerifiedAt,
+		"last_applied_config_hash": verification.AppliedConfigHash,
+		"applied_user_count":       verification.AppliedUserCount,
+	}
+	if strings.TrimSpace(verification.RealityPublicKey) != "" {
+		updates["reality_public_key"] = verification.RealityPublicKey
+	}
+	if strings.TrimSpace(verification.RealityShortID) != "" {
+		updates["reality_short_id"] = verification.RealityShortID
+	}
+	if strings.TrimSpace(verification.RealityServerName) != "" {
+		updates["reality_server_name"] = verification.RealityServerName
+	}
+	if nodeReachable {
+		updates["health_status"] = "online"
+		updates["last_heartbeat"] = &verification.VerifiedAt
+	}
+	_ = s.db.Model(&models.Node{}).Where("id = ?", nodeID).Updates(updates).Error
+}
+
+func hashSyncPayload(payload SyncPayloadWithLimits) string {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
+}
+
+func countEnabledSyncUsers(users []SyncUser) int {
+	total := 0
+	for _, user := range users {
+		if user.Enabled {
+			total++
+		}
+	}
+	return total
 }
 
 type ReinstallNodeInput struct {

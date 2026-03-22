@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -18,26 +20,33 @@ import (
 )
 
 type ApplyConfigRequest struct {
-	NodeName             string   `json:"nodeName"`
-	RealitySNIs          []string `json:"realitySnis"`
-	Hysteria2Masquerades []string `json:"hysteria2Masquerades"`
-	Users                []struct {
-		ID               uint   `json:"id"`
-		UUID             string `json:"uuid"`
-		Email            string `json:"email"`
-		Enabled          bool   `json:"enabled"`
-		BandwidthLimitGB int64  `json:"bandwidthLimitGb"`
-	} `json:"users"`
+	NodeName             string            `json:"nodeName"`
+	RealitySNIs          []string          `json:"realitySnis"`
+	Hysteria2Masquerades []string          `json:"hysteria2Masquerades"`
+	Users                []ApplyConfigUser `json:"users"`
+}
+
+type ApplyConfigUser struct {
+	ID               uint   `json:"id"`
+	UUID             string `json:"uuid"`
+	Email            string `json:"email"`
+	Enabled          bool   `json:"enabled"`
+	BandwidthLimitGB int64  `json:"bandwidthLimitGb"`
 }
 
 type ConfigService struct {
-	cfg               config.Config
-	mu                sync.RWMutex
-	lastReload        time.Time
-	lastError         string
-	activeUsers       int
-	activeListenPorts []int
-	bandwidthTracker  *BandwidthTracker
+	cfg                    config.Config
+	mu                     sync.RWMutex
+	lastReload             time.Time
+	lastError              string
+	activeUsers            int
+	activeListenPorts      []int
+	bandwidthTracker       *BandwidthTracker
+	lastAppliedConfigHash  string
+	appliedUserCount       int
+	syncVerificationStatus string
+	syncVerificationError  string
+	syncVerificationAt     *time.Time
 }
 
 func NewConfigService(cfg config.Config) *ConfigService {
@@ -56,6 +65,13 @@ func (s *ConfigService) GetBandwidthTracker() *BandwidthTracker {
 }
 
 func (s *ConfigService) Apply(req ApplyConfigRequest) error {
+	expectedHash, err := canonicalApplyConfigHash(req)
+	if err != nil {
+		s.recordApplyVerification("error", err.Error(), "", 0, nil)
+		return err
+	}
+	effectiveNodeName := s.effectiveNodeName(req)
+
 	users := make([]singbox.User, 0, len(req.Users))
 	singboxUsers := make([]struct {
 		UUID             string
@@ -88,7 +104,7 @@ func (s *ConfigService) Apply(req ApplyConfigRequest) error {
 	}
 
 	payload, err := singbox.Generate(
-		s.cfg.NodeName,
+		effectiveNodeName,
 		s.cfg.PublicHost,
 		s.cfg.VLESSRealityPrivateKey,
 		s.cfg.VLESSRealityServerName,
@@ -105,11 +121,13 @@ func (s *ConfigService) Apply(req ApplyConfigRequest) error {
 	)
 	if err != nil {
 		s.setError(err.Error())
+		s.recordApplyVerification("error", err.Error(), expectedHash, countEnabledUsers(req.Users), nil)
 		return err
 	}
 
 	if err := os.WriteFile(s.cfg.SingboxConfigPath, payload, 0o644); err != nil {
 		s.setError(err.Error())
+		s.recordApplyVerification("error", err.Error(), expectedHash, countEnabledUsers(req.Users), nil)
 		return err
 	}
 	if err := s.ensureV2RayAPIEnvDefault(); err != nil {
@@ -120,15 +138,18 @@ func (s *ConfigService) Apply(req ApplyConfigRequest) error {
 			log.Printf("[config-service] sing-box validation failed with v2ray api enabled, retrying without v2ray api: %v", err)
 			if writeErr := os.WriteFile(s.cfg.SingboxConfigPath, fallbackPayload, 0o644); writeErr != nil {
 				s.setError(writeErr.Error())
+				s.recordApplyVerification("error", writeErr.Error(), expectedHash, countEnabledUsers(req.Users), nil)
 				return writeErr
 			}
 			if validateErr := s.validateSingboxConfig(); validateErr != nil {
 				s.setError(validateErr.Error())
+				s.recordApplyVerification("error", validateErr.Error(), expectedHash, countEnabledUsers(req.Users), nil)
 				return validateErr
 			}
 			s.bandwidthTracker.DisableV2RayAPI()
 		} else {
 			s.setError(err.Error())
+			s.recordApplyVerification("error", err.Error(), expectedHash, countEnabledUsers(req.Users), nil)
 			return err
 		}
 	}
@@ -139,11 +160,12 @@ func (s *ConfigService) Apply(req ApplyConfigRequest) error {
 
 	if err := s.reload(); err != nil {
 		s.setError(err.Error())
+		s.recordApplyVerification("error", err.Error(), expectedHash, countEnabledUsers(req.Users), nil)
 		return err
 	}
 
-	layout := singbox.BuildTransportLayout(s.cfg.NodeName, s.cfg.PublicHost, req.RealitySNIs, req.Hysteria2Masquerades)
-	shadowsocksPlans := singbox.BuildShadowsocksInboundPlans(s.cfg.NodeName, s.cfg.PublicHost, users)
+	layout := singbox.BuildTransportLayout(effectiveNodeName, s.cfg.PublicHost, req.RealitySNIs, req.Hysteria2Masquerades)
+	shadowsocksPlans := singbox.BuildShadowsocksInboundPlans(effectiveNodeName, s.cfg.PublicHost, users)
 	activePorts := make([]int, 0, len(layout.VLESS)+len(layout.Hysteria2)+len(shadowsocksPlans)+1)
 	for _, plan := range layout.VLESS {
 		activePorts = append(activePorts, plan.Port)
@@ -158,11 +180,17 @@ func (s *ConfigService) Apply(req ApplyConfigRequest) error {
 		activePorts = append(activePorts, plan.Port)
 	}
 
+	appliedAt := time.Now()
 	s.mu.Lock()
-	s.lastReload = time.Now()
+	s.lastReload = appliedAt
 	s.lastError = ""
 	s.activeUsers = countEnabledUsers(req.Users)
 	s.activeListenPorts = activePorts
+	s.lastAppliedConfigHash = expectedHash
+	s.appliedUserCount = countEnabledUsers(req.Users)
+	s.syncVerificationStatus = "applied"
+	s.syncVerificationError = ""
+	s.syncVerificationAt = &appliedAt
 	s.mu.Unlock()
 
 	// Update bandwidth tracker with active users
@@ -179,18 +207,23 @@ func (s *ConfigService) Status() map[string]interface{} {
 	trackerStatus := s.bandwidthTracker.GetStatus()
 
 	return map[string]interface{}{
-		"nodeName":           s.cfg.NodeName,
-		"publicHost":         s.cfg.PublicHost,
-		"configPath":         s.cfg.SingboxConfigPath,
-		"lastReload":         s.lastReload,
-		"lastError":          s.lastError,
-		"activeUsers":        s.activeUsers,
-		"bandwidthUsedBytes": bandwidthUsedBytes,
-		"realityPublicKey":   s.cfg.VLESSRealityPublicKey,
-		"realityShortId":     s.cfg.VLESSRealityShortID,
-		"realityServerName":  s.cfg.VLESSRealityServerName,
-		"status":             "ok",
-		"bandwidthTracker":   trackerStatus,
+		"nodeName":               s.cfg.NodeName,
+		"publicHost":             s.cfg.PublicHost,
+		"configPath":             s.cfg.SingboxConfigPath,
+		"lastReload":             s.lastReload,
+		"lastError":              s.lastError,
+		"activeUsers":            s.activeUsers,
+		"bandwidthUsedBytes":     bandwidthUsedBytes,
+		"realityPublicKey":       s.cfg.VLESSRealityPublicKey,
+		"realityShortId":         s.cfg.VLESSRealityShortID,
+		"realityServerName":      s.cfg.VLESSRealityServerName,
+		"status":                 "ok",
+		"bandwidthTracker":       trackerStatus,
+		"lastAppliedConfigHash":  s.lastAppliedConfigHash,
+		"appliedUserCount":       s.appliedUserCount,
+		"syncVerificationStatus": valueOrDefault(s.syncVerificationStatus, "unknown"),
+		"syncVerificationError":  s.syncVerificationError,
+		"syncVerificationAt":     s.syncVerificationAt,
 	}
 }
 
@@ -257,7 +290,7 @@ func (s *ConfigService) buildV2RayAPIFallbackPayload(req ApplyConfigRequest, use
 	}
 
 	return singbox.Generate(
-		s.cfg.NodeName,
+		s.effectiveNodeName(req),
 		s.cfg.PublicHost,
 		s.cfg.VLESSRealityPrivateKey,
 		s.cfg.VLESSRealityServerName,
@@ -280,8 +313,9 @@ func (s *ConfigService) ensureFirewallPorts(req ApplyConfigRequest) error {
 	}
 
 	ports := make([]string, 0, 4)
-	layout := singbox.BuildTransportLayout(s.cfg.NodeName, s.cfg.PublicHost, req.RealitySNIs, req.Hysteria2Masquerades)
-	shadowsocksPlans := singbox.BuildShadowsocksInboundPlans(s.cfg.NodeName, s.cfg.PublicHost, usersFromApplyRequest(req.Users))
+	effectiveNodeName := s.effectiveNodeName(req)
+	layout := singbox.BuildTransportLayout(effectiveNodeName, s.cfg.PublicHost, req.RealitySNIs, req.Hysteria2Masquerades)
+	shadowsocksPlans := singbox.BuildShadowsocksInboundPlans(effectiveNodeName, s.cfg.PublicHost, usersFromApplyRequest(req.Users))
 	ports = appendPorts(ports, "tcp", layout.VLESS)
 	if layout.TUIC.Port > 0 {
 		ports = append(ports, fmt.Sprintf("%d/udp", layout.TUIC.Port))
@@ -299,6 +333,13 @@ func (s *ConfigService) ensureFirewallPorts(req ApplyConfigRequest) error {
 	}
 
 	return nil
+}
+
+func (s *ConfigService) effectiveNodeName(req ApplyConfigRequest) string {
+	if strings.TrimSpace(req.NodeName) != "" {
+		return strings.TrimSpace(req.NodeName)
+	}
+	return s.cfg.NodeName
 }
 
 func (s *ConfigService) setError(message string) {
@@ -359,13 +400,7 @@ func (s *ConfigService) ensureV2RayAPIEnvDefault() error {
 	return os.WriteFile(envPath, []byte(updated), 0o644)
 }
 
-func countEnabledUsers(users []struct {
-	ID               uint   `json:"id"`
-	UUID             string `json:"uuid"`
-	Email            string `json:"email"`
-	Enabled          bool   `json:"enabled"`
-	BandwidthLimitGB int64  `json:"bandwidthLimitGb"`
-}) int {
+func countEnabledUsers(users []ApplyConfigUser) int {
 	total := 0
 	for _, user := range users {
 		if user.Enabled {
@@ -389,13 +424,7 @@ func appendHy2Ports(ports []string, plans []singbox.Hysteria2InboundPlan) []stri
 	return ports
 }
 
-func usersFromApplyRequest(users []struct {
-	ID               uint   `json:"id"`
-	UUID             string `json:"uuid"`
-	Email            string `json:"email"`
-	Enabled          bool   `json:"enabled"`
-	BandwidthLimitGB int64  `json:"bandwidthLimitGb"`
-}) []singbox.User {
+func usersFromApplyRequest(users []ApplyConfigUser) []singbox.User {
 	result := make([]singbox.User, 0, len(users))
 	for _, user := range users {
 		result = append(result, singbox.User{
@@ -481,4 +510,30 @@ func (s *ConfigService) restoreTrackedUsersFromConfig() {
 	s.mu.Unlock()
 
 	log.Printf("[config-service] restored %d tracked users from existing sing-box config", len(trackedUsers))
+}
+
+func (s *ConfigService) recordApplyVerification(status, message, configHash string, appliedUserCount int, verifiedAt *time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastAppliedConfigHash = configHash
+	s.appliedUserCount = appliedUserCount
+	s.syncVerificationStatus = status
+	s.syncVerificationError = message
+	s.syncVerificationAt = verifiedAt
+}
+
+func canonicalApplyConfigHash(req ApplyConfigRequest) (string, error) {
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func valueOrDefault(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
