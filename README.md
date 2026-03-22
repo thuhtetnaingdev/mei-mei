@@ -38,6 +38,14 @@ Node backend:
 MEIMEI_CONTROL_PLANE_TOKEN="<panel NODE_SHARED_TOKEN>" bash <(curl -fsSL https://raw.githubusercontent.com/thuhtetnaingdev/mei-mei/main/install/node.sh)
 ```
 
+Local development deploy to a node over SSH using a local tarball instead of GitHub:
+
+```bash
+./install/node-local.sh
+```
+
+The local deploy helper prompts for node IP and SSH username, then uses normal `ssh`/`scp` password prompts from your terminal if needed. It uploads the matching `dist/node_backend-linux-*.tar.gz` and installs it remotely. The control plane shared token is optional in this local-dev flow.
+
 Notes:
 
 - The panel installer now installs both `panel_backend` and a prebuilt `panel_frontend` bundle, then serves them together from one backend service.

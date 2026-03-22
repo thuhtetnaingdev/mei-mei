@@ -13,6 +13,7 @@ export function LoginPage() {
   const [credentials, setCredentials] = useState({ username: "admin", password: "admin" });
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const queryFrom = new URLSearchParams(location.search).get("from");
 
   if (isAuthenticated()) {
     return <Navigate to="/" replace />;
@@ -26,7 +27,7 @@ export function LoginPage() {
     try {
       const response = await api.post<LoginResponse>("/auth/login", credentials);
       setPanelToken(response.data.token);
-      const nextPath = typeof location.state?.from === "string" ? location.state.from : "/";
+      const nextPath = queryFrom ?? (typeof location.state?.from === "string" ? location.state.from : "/");
       navigate(nextPath, { replace: true });
     } catch {
       setError("Login failed. Check your admin username and password.");

@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"panel_backend/internal/api"
@@ -37,24 +39,45 @@ func main() {
 
 	router := api.NewRouterWithServices(cfg, database, userService, nodeService, collector)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	addr := fmt.Sprintf(":%s", cfg.Port)
+	server := &http.Server{
+		Addr:    addr,
+		Handler: router,
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 	collector.Start(ctx)
 
-	// Handle graceful shutdown
+	shutdownDone := make(chan struct{})
 	go func() {
-		// Wait for interrupt signal
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-		<-sigChan
+		defer close(shutdownDone)
+		<-ctx.Done()
+
 		log.Println("shutting down...")
-		cancel()
 		collector.Stop()
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("http shutdown failed: %v", err)
+		}
+
+		sqlDB, err := database.DB()
+		if err != nil {
+			log.Printf("database shutdown failed: %v", err)
+			return
+		}
+		if err := sqlDB.Close(); err != nil {
+			log.Printf("database close failed: %v", err)
+		}
 	}()
 
-	addr := fmt.Sprintf(":%s", cfg.Port)
 	log.Printf("panel_backend listening on %s", addr)
-	if err := router.Run(addr); err != nil {
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("server failed: %v", err)
 	}
+
+	<-shutdownDone
 }

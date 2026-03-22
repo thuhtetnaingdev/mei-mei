@@ -1,5 +1,6 @@
 import axios from "axios";
 import type { InternalAxiosRequestConfig } from "axios";
+import { notifySessionExpired } from "../auth";
 
 type CompatAxiosRequestConfig = InternalAxiosRequestConfig & {
   _legacyRetryWithoutApiPrefix?: boolean;
@@ -48,6 +49,13 @@ api.interceptors.response.use(
 
     const config = error.config as CompatAxiosRequestConfig;
     const requestUrl = config.url ?? "";
+    const isAuthRequest = requestUrl.startsWith("/auth/");
+
+    if (error.response?.status === 401 && !isAuthRequest) {
+      notifySessionExpired();
+      return Promise.reject(error);
+    }
+
     const shouldRetryLegacyRoute =
       error.response?.status === 404 &&
       !config._legacyRetryWithoutApiPrefix &&
