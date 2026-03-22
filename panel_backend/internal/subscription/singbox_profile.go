@@ -220,7 +220,10 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 				"password":              user.UUID,
 				"udp":                   true,
 				"skip-cert-verify":      true,
+				"alpn":                  []string{"h3"},
 				"congestion-controller": "bbr",
+				"udp-relay-mode":        "native",
+				"request-timeout":       8000,
 			}
 			if net.ParseIP(node.PublicHost) != nil {
 				tuicProxy["disable-sni"] = true

@@ -113,6 +113,16 @@ func TestGenerateClashProfileUsesDisableSNIForTUICIPHosts(t *testing.T) {
 		if proxy["disable-sni"] != true {
 			t.Fatalf("expected TUIC proxy to set disable-sni=true, got %v", proxy["disable-sni"])
 		}
+		alpn, ok := proxy["alpn"].([]interface{})
+		if !ok || len(alpn) != 1 || alpn[0] != "h3" {
+			t.Fatalf("expected TUIC proxy to include alpn [h3], got %#v", proxy["alpn"])
+		}
+		if proxy["udp-relay-mode"] != "native" {
+			t.Fatalf("expected TUIC proxy to set udp-relay-mode=native, got %v", proxy["udp-relay-mode"])
+		}
+		if proxy["request-timeout"] != 8000 {
+			t.Fatalf("expected TUIC proxy to set request-timeout=8000, got %v", proxy["request-timeout"])
+		}
 		return
 	}
 
