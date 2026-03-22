@@ -38,6 +38,7 @@ type BootstrapNodeInput struct {
 	Password             string `json:"password" binding:"required"`
 	Location             string `json:"location"`
 	PublicHost           string `json:"publicHost"`
+	IsTestable           bool   `json:"isTestable"`
 	SSHPort              int    `json:"sshPort"`
 	NodePort             int    `json:"nodePort"`
 	SingboxReloadCommand string `json:"singboxReloadCommand"`
@@ -289,6 +290,7 @@ func (s *NodeService) upsertBootstrapNodeRecord(input BootstrapNodeInput, artifa
 		SSHPrivateKey:     artifact.sshPrivateKeyPEM,
 		SSHPublicKey:      artifact.sshPublicKey,
 		PublicHost:        input.PublicHost,
+		IsTestable:        input.IsTestable,
 		VLESSPort:         0,
 		TUICPort:          0,
 		Hysteria2Port:     0,

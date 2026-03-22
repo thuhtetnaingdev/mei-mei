@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
 	"panel_backend/internal/models"
 	"panel_backend/internal/services"
-	"gopkg.in/yaml.v3"
 )
 
 func TestGenerateNodeLinksIncludesUserSpecificShadowsocksLink(t *testing.T) {
@@ -127,4 +127,23 @@ func TestGenerateClashProfileUsesDisableSNIForTUICIPHosts(t *testing.T) {
 	}
 
 	t.Fatal("expected TUIC proxy to be present in clash profile")
+}
+
+func TestGenerateNodeLinksFiltersTestingUsersToTestableNodes(t *testing.T) {
+	user := models.User{ID: 1, UUID: "user-1", Email: "one@example.com", Enabled: true, IsTesting: true}
+	nodes := []models.Node{
+		{Name: "prod", PublicHost: "prod.example.com", Enabled: true, IsTestable: false},
+		{Name: "test", PublicHost: "test.example.com", Enabled: true, IsTestable: true},
+	}
+
+	links := GenerateNodeLinks(user, nodes, services.ProtocolSettings{})
+
+	if len(links) == 0 {
+		t.Fatal("expected testing user to receive at least one node link")
+	}
+	for _, link := range links {
+		if link.NodeName != "test" {
+			t.Fatalf("unexpected node %q in testing user links", link.NodeName)
+		}
+	}
 }

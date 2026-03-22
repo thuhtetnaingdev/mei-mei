@@ -26,10 +26,14 @@ func isNodeBandwidthExceeded(node models.Node) bool {
 	return node.BandwidthUsedBytes >= limitBytes
 }
 
-// filterAvailableNodes returns only nodes that are enabled and have not exceeded their bandwidth limit
-func filterAvailableNodes(nodes []models.Node) []models.Node {
+// filterAvailableNodes returns only nodes that are enabled and have not exceeded their bandwidth limit.
+// Testing users only receive testable nodes.
+func filterAvailableNodes(user models.User, nodes []models.Node) []models.Node {
 	available := make([]models.Node, 0, len(nodes))
 	for _, node := range nodes {
+		if user.IsTesting && !node.IsTestable {
+			continue
+		}
 		if node.Enabled && !isNodeBandwidthExceeded(node) {
 			available = append(available, node)
 		}
@@ -38,7 +42,7 @@ func filterAvailableNodes(nodes []models.Node) []models.Node {
 }
 
 func Generate(user models.User, nodes []models.Node, settings services.ProtocolSettings) string {
-	availableNodes := filterAvailableNodes(nodes)
+	availableNodes := filterAvailableNodes(user, nodes)
 	links := GenerateNodeLinks(user, availableNodes, settings)
 	lines := make([]string, 0, len(links))
 	for _, link := range links {
@@ -48,7 +52,7 @@ func Generate(user models.User, nodes []models.Node, settings services.ProtocolS
 }
 
 func GenerateNodeLinks(user models.User, nodes []models.Node, settings services.ProtocolSettings) []NodeLink {
-	availableNodes := filterAvailableNodes(nodes)
+	availableNodes := filterAvailableNodes(user, nodes)
 	var links []NodeLink
 
 	for _, node := range availableNodes {

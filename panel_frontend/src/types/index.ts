@@ -3,6 +3,7 @@ export interface User {
   uuid: string;
   email: string;
   enabled: boolean;
+  isTesting: boolean;
   expiresAt?: string | null;
   bandwidthLimitGb: number;
   bandwidthUsedBytes: number;
@@ -64,6 +65,7 @@ export interface Node {
   name: string;
   baseUrl: string;
   enabled: boolean;
+  isTestable: boolean;
   location: string;
   publicHost: string;
   expiresAt?: string | null;

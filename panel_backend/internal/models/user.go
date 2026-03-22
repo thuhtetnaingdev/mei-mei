@@ -7,6 +7,7 @@ type User struct {
 	UUID                 string                    `json:"uuid" gorm:"uniqueIndex;not null"`
 	Email                string                    `json:"email" gorm:"uniqueIndex;not null"`
 	Enabled              bool                      `json:"enabled" gorm:"default:true"`
+	IsTesting            bool                      `json:"isTesting" gorm:"default:false"`
 	ExpiresAt            *time.Time                `json:"expiresAt"`
 	BandwidthLimitGB     int64                     `json:"bandwidthLimitGb"`
 	BandwidthUsedBytes   int64                     `json:"bandwidthUsedBytes"`
@@ -18,27 +19,27 @@ type User struct {
 }
 
 type UserBandwidthAllocation struct {
-	ID                      uint                      `json:"id" gorm:"primaryKey"`
-	UserID                  uint                      `json:"userId" gorm:"index;not null"`
-	TotalBandwidthBytes     int64                     `json:"totalBandwidthBytes" gorm:"not null"`
-	RemainingBandwidthBytes int64                     `json:"remainingBandwidthBytes" gorm:"not null"`
-	TokenAmount             float64                   `json:"tokenAmount" gorm:"not null"`
-	RemainingTokens         float64                   `json:"remainingTokens" gorm:"not null"`
-	AdminPercent            float64                   `json:"adminPercent"`
-	UsagePoolPercent        float64                   `json:"usagePoolPercent"`
-	ReservePoolPercent      float64                   `json:"reservePoolPercent"`
-	AdminAmount             float64                   `json:"adminAmount"`
-	UsagePoolTotal          float64                   `json:"usagePoolTotal"`
-	UsagePoolDistributed    float64                   `json:"usagePoolDistributed"`
-	ReservePoolTotal        float64                   `json:"reservePoolTotal"`
-	ReservePoolDistributed  float64                   `json:"reservePoolDistributed"`
-	SettlementStatus        string                    `json:"settlementStatus"`
-	SettlementWarning       string                    `json:"settlementWarning"`
-	SettledAt               *time.Time                `json:"settledAt"`
-	ExpiresAt               *time.Time                `json:"expiresAt"`
-	NodeUsages              []UserBandwidthNodeUsage  `json:"nodeUsages" gorm:"foreignKey:AllocationID;constraint:OnDelete:CASCADE;"`
-	CreatedAt               time.Time                 `json:"createdAt"`
-	UpdatedAt               time.Time                 `json:"updatedAt"`
+	ID                      uint                     `json:"id" gorm:"primaryKey"`
+	UserID                  uint                     `json:"userId" gorm:"index;not null"`
+	TotalBandwidthBytes     int64                    `json:"totalBandwidthBytes" gorm:"not null"`
+	RemainingBandwidthBytes int64                    `json:"remainingBandwidthBytes" gorm:"not null"`
+	TokenAmount             float64                  `json:"tokenAmount" gorm:"not null"`
+	RemainingTokens         float64                  `json:"remainingTokens" gorm:"not null"`
+	AdminPercent            float64                  `json:"adminPercent"`
+	UsagePoolPercent        float64                  `json:"usagePoolPercent"`
+	ReservePoolPercent      float64                  `json:"reservePoolPercent"`
+	AdminAmount             float64                  `json:"adminAmount"`
+	UsagePoolTotal          float64                  `json:"usagePoolTotal"`
+	UsagePoolDistributed    float64                  `json:"usagePoolDistributed"`
+	ReservePoolTotal        float64                  `json:"reservePoolTotal"`
+	ReservePoolDistributed  float64                  `json:"reservePoolDistributed"`
+	SettlementStatus        string                   `json:"settlementStatus"`
+	SettlementWarning       string                   `json:"settlementWarning"`
+	SettledAt               *time.Time               `json:"settledAt"`
+	ExpiresAt               *time.Time               `json:"expiresAt"`
+	NodeUsages              []UserBandwidthNodeUsage `json:"nodeUsages" gorm:"foreignKey:AllocationID;constraint:OnDelete:CASCADE;"`
+	CreatedAt               time.Time                `json:"createdAt"`
+	UpdatedAt               time.Time                `json:"updatedAt"`
 }
 
 type UserBandwidthNodeUsage struct {

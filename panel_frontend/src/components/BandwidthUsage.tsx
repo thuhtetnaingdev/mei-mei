@@ -29,8 +29,8 @@ export function BandwidthUsage({ usedBytes, limitGb, showDetails = true }: Bandw
 
   if (isUnlimited) {
     return (
-      <div className="space-y-2">
-        <div className="flex items-center justify-between text-xs">
+      <div className="min-w-0 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
           <span className="font-medium text-slate-200">{formatBytes(usedBytes)} used</span>
           <span className="text-slate-500">Unlimited</span>
         </div>
@@ -45,12 +45,12 @@ export function BandwidthUsage({ usedBytes, limitGb, showDetails = true }: Bandw
   }
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between text-xs">
+    <div className="min-w-0 space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
         <span className={`font-medium ${isExceeded ? "text-rose-400" : "text-slate-200"}`}>
           {formatBytes(usedBytes)} used
         </span>
-        <span className={`${isExceeded ? "font-semibold text-rose-400" : "text-slate-400"}`}>
+        <span className={`text-right ${isExceeded ? "font-semibold text-rose-400" : "text-slate-400"}`}>
           {limitGb} GB limit
           {isExceeded && " (Exceeded!)"}
         </span>

@@ -23,6 +23,16 @@ interface SubscriptionResponse {
   }>;
 }
 
+interface SyncNodesResponse {
+  syncedUsers: number;
+  results: Array<{
+    node: string;
+    status: string;
+    error?: string;
+    mode?: string;
+  }>;
+}
+
 type UserAccessNodeUsageRow = {
   key: string;
   nodeId?: number;
@@ -42,6 +52,7 @@ type NodeUsageRingProps = {
 type UserFormState = {
   email: string;
   enabled: boolean;
+  isTesting: boolean;
   notes: string;
   initialBandwidthGb: number;
   initialTokenAmount: number;
@@ -51,6 +62,7 @@ type UserFormState = {
 const defaultFormState: UserFormState = {
   email: "",
   enabled: true,
+  isTesting: false,
   notes: "",
   initialBandwidthGb: 100,
   initialTokenAmount: 100,
@@ -285,11 +297,11 @@ const buildUserAccessNodeUsage = (
 
 function AllocationSummary({ allocation }: { allocation: UserBandwidthAllocation }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-3">
+    <div className="min-w-0 rounded-2xl border border-white/10 bg-slate-950/35 p-3">
       <p className="text-sm font-medium text-white">
         {formatBandwidthBytes(allocation.remainingBandwidthBytes)} left of {formatBandwidthBytes(allocation.totalBandwidthBytes)}
       </p>
-      <p className="mt-1 text-xs text-slate-500">
+      <p className="mt-1 break-words text-xs text-slate-500">
         {allocation.remainingTokens.toFixed(2)} / {allocation.tokenAmount.toFixed(2)} tokens · {formatDate(allocation.expiresAt)}
       </p>
     </div>
@@ -359,7 +371,17 @@ export function UsersPage() {
   const loadNodes = () => api.get<Node[]>("/nodes").then((res) => setNodes(res.data));
   const loadTreasury = () =>
     api.get<MintPoolSnapshot>("/mint-pool").then((res) => setMainWalletBalance(res.data.pool.mainWalletBalance));
-  const syncNodes = () => api.post("/nodes/sync").catch(() => undefined);
+  const syncNodes = async () => {
+    const response = await api.post<SyncNodesResponse>("/nodes/sync");
+    const failedNodes = (response.data.results ?? []).filter((result) => result.status !== "success");
+    if (failedNodes.length > 0) {
+      throw new Error(
+        failedNodes
+          .map((result) => `${result.node}: ${result.error || "sync failed"}`)
+          .join("; ")
+      );
+    }
+  };
 
   useEffect(() => {
     void Promise.all([loadUsers(), loadTreasury(), loadNodes().catch(() => undefined)]).catch(() => undefined);
@@ -398,11 +420,12 @@ export function UsersPage() {
         await api.patch(`/users/${editingUserId}`, {
           email: form.email,
           enabled: form.enabled,
+          isTesting: form.isTesting,
           notes: form.notes
         });
         setFormStatus("User updated.");
       } else {
-        if (form.initialBandwidthGb > 0 && !form.initialExpiresAt) {
+        if (!form.isTesting && form.initialBandwidthGb > 0 && !form.initialExpiresAt) {
           setFormError("Initial expiry is required when assigning bandwidth.");
           return;
         }
@@ -410,8 +433,9 @@ export function UsersPage() {
         await api.post("/users", {
           email: form.email,
           enabled: form.enabled,
+          isTesting: form.isTesting,
           notes: form.notes,
-          bandwidthAllocations: form.initialBandwidthGb > 0 ? [
+          bandwidthAllocations: !form.isTesting && form.initialBandwidthGb > 0 ? [
             {
               bandwidthGb: form.initialBandwidthGb,
               tokenAmount: form.initialTokenAmount,
@@ -474,6 +498,7 @@ export function UsersPage() {
     setForm({
       email: user.email,
       enabled: user.enabled,
+      isTesting: user.isTesting,
       notes: user.notes ?? "",
       initialBandwidthGb: 0,
       initialTokenAmount: 0,
@@ -790,6 +815,7 @@ export function UsersPage() {
         eyebrow="User Directory"
         title="Manage users"
         description="The desktop table stays dense for operations speed, while mobile automatically switches to compact stacked cards."
+        className="min-w-0 overflow-hidden"
       >
         <div className="space-y-4">
           {formStatus ? <p className="text-sm text-slate-400">{formStatus}</p> : null}
@@ -823,6 +849,14 @@ export function UsersPage() {
                         <td>
                           <div className="min-w-[180px]">
                             <p className="font-semibold text-white">{user.email}</p>
+                            <div className="mt-1 flex flex-wrap gap-1.5">
+                              {user.isTesting ? (
+                                <span className="status-pill text-[10px] text-amber-200">
+                                  <span className="h-2 w-2 rounded-full bg-amber-300" />
+                                  testing
+                                </span>
+                              ) : null}
+                            </div>
                             <p className="mt-1 text-xs text-slate-500">{user.notes || "No notes"}</p>
                           </div>
                         </td>
@@ -875,45 +909,53 @@ export function UsersPage() {
             </div>
           </div>
 
-          <div className="grid gap-3 lg:hidden">
+          <div className="min-w-0 grid gap-2.5 lg:hidden">
             {users.map((user) => {
               const summary = deriveUserSummary(user);
 
               return (
-                <article key={user.id} className="panel-subtle p-4">
-                  <div className="flex flex-col gap-3">
-                    <div className="flex items-start justify-between gap-3">
+                <article key={user.id} className="panel-subtle min-w-0 overflow-hidden px-3 py-3.5">
+                  <div className="min-w-0 flex flex-col gap-2.5">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-white">{user.email}</p>
-                        <p className="mt-1 truncate font-mono text-xs text-slate-500">{user.uuid}</p>
+                        <p className="break-words text-[15px] font-semibold leading-5 text-white">{user.email}</p>
+                        <div className="mt-1 flex flex-wrap gap-1.5">
+                          {user.isTesting ? (
+                            <span className="status-pill w-fit max-w-full shrink-0 px-2 py-1 text-[10px] text-amber-200">
+                              <span className="h-2 w-2 rounded-full bg-amber-300" />
+                              testing
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="mt-1 break-all font-mono text-[11px] leading-4 text-slate-500">{user.uuid}</p>
                       </div>
-                      <span className={`status-pill shrink-0 ${user.enabled ? "text-emerald-300" : "text-slate-400"}`}>
+                      <span className={`status-pill w-fit max-w-full shrink-0 self-start px-2.5 py-1 text-[10px] ${user.enabled ? "text-emerald-300" : "text-slate-400"}`}>
                         <span className={`h-2 w-2 rounded-full ${user.enabled ? "bg-emerald-400" : "bg-slate-500"}`} />
                         {user.enabled ? "enabled" : "disabled"}
                       </span>
                     </div>
-                    <BandwidthUsage usedBytes={user.bandwidthUsedBytes} limitGb={summary.bandwidthLimitGb} showDetails />
-                    <div className="grid gap-2 text-xs text-slate-400 sm:grid-cols-2">
-                      <div className="panel-subtle p-3">
+                    <BandwidthUsage usedBytes={user.bandwidthUsedBytes} limitGb={summary.bandwidthLimitGb} showDetails={false} />
+                    <div className="grid gap-2 text-xs text-slate-400 grid-cols-2">
+                      <div className="panel-subtle min-w-0 px-3 py-2.5">
                         <p className="metric-kicker">Notes</p>
-                        <p className="mt-2 text-sm text-slate-300">{user.notes || "No notes"}</p>
+                        <p className="mt-1.5 line-clamp-2 break-words text-sm text-slate-300">{user.notes || "No notes"}</p>
                       </div>
-                      <div className="panel-subtle p-3">
+                      <div className="panel-subtle min-w-0 px-3 py-2.5">
                         <p className="metric-kicker">Expiry</p>
-                        <p className="mt-2 text-sm text-slate-300">{formatDate(summary.expiresAt)}</p>
+                        <p className="mt-1.5 break-words text-sm text-slate-300">{formatDate(summary.expiresAt)}</p>
                       </div>
-                      <div className="panel-subtle p-3">
+                      <div className="panel-subtle min-w-0 px-3 py-2.5">
                         <p className="metric-kicker">Token Balance</p>
-                        <p className="mt-2 text-sm text-emerald-300">{summary.tokenBalance.toFixed(2)}</p>
+                        <p className="mt-1.5 text-sm text-emerald-300">{summary.tokenBalance.toFixed(2)}</p>
                       </div>
-                      <div className="panel-subtle p-3">
+                      <div className="panel-subtle min-w-0 px-3 py-2.5">
                         <p className="metric-kicker">Bandwidth Entries</p>
-                        <p className="mt-2 text-sm text-slate-300">{(user.bandwidthAllocations ?? []).length}</p>
+                        <p className="mt-1.5 text-sm text-slate-300">{(user.bandwidthAllocations ?? []).length}</p>
                       </div>
                     </div>
-                    <div className="panel-subtle p-3">
+                    <div className="panel-subtle min-w-0 px-3 py-2.5">
                       <p className="metric-kicker">Bandwidth List</p>
-                      <div className="mt-2 space-y-2">
+                      <div className="mt-2 min-w-0 space-y-1.5">
                         {(user.bandwidthAllocations ?? []).length ? (user.bandwidthAllocations ?? []).map((allocation) => (
                           <AllocationSummary key={allocation.id} allocation={allocation} />
                         )) : (
@@ -921,15 +963,15 @@ export function UsersPage() {
                         )}
                       </div>
                     </div>
-                    <div className="grid gap-2 sm:grid-cols-3">
-                      <button onClick={() => startEdit(user)} className="btn-secondary w-full justify-center">
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <button onClick={() => startEdit(user)} className="btn-secondary w-full justify-center px-0 py-2 text-xs">
                         Edit
                       </button>
-                      <button onClick={() => void openAccess(user)} className="btn-primary w-full justify-center gap-2">
-                        <QrCode className="h-4 w-4" />
+                      <button onClick={() => void openAccess(user)} className="btn-primary w-full justify-center gap-1.5 px-0 py-2 text-xs">
+                        <QrCode className="h-3.5 w-3.5" />
                         QR
                       </button>
-                      <button onClick={() => setDeleteTarget(user)} className="btn-danger w-full justify-center">
+                      <button onClick={() => setDeleteTarget(user)} className="btn-danger w-full justify-center px-0 py-2 text-xs">
                         Delete
                       </button>
                     </div>
@@ -1000,6 +1042,22 @@ export function UsersPage() {
                   Enabled for node sync
                 </label>
 
+                <label className="flex items-center gap-3 rounded-2xl border border-amber-300/15 bg-amber-300/[0.06] px-4 py-3 text-sm text-amber-100">
+                  <input
+                    type="checkbox"
+                    checked={form.isTesting}
+                    onChange={(event) => setForm((current) => ({ ...current, isTesting: event.target.checked }))}
+                    className="h-4 w-4 rounded border-white/20 bg-transparent"
+                  />
+                  Testing user
+                </label>
+
+                {form.isTesting ? (
+                  <div className="rounded-2xl border border-amber-300/20 bg-amber-300/[0.06] px-4 py-3 text-sm text-amber-100">
+                    Testing users skip token funding and bandwidth package rules. They only sync to nodes marked testable.
+                  </div>
+                ) : null}
+
                 <div className="flex flex-wrap justify-end gap-3">
                   <button type="button" onClick={closeUserDialog} className="btn-secondary">
                     Close
@@ -1010,60 +1068,71 @@ export function UsersPage() {
                 </div>
               </form>
 
-              <form className="panel-subtle space-y-4 p-4 sm:p-5" onSubmit={(event) => void submitAllocation(event)}>
-                <div>
-                  <p className="metric-kicker">Add Bandwidth</p>
-                  <p className="mt-2 text-sm text-slate-400">Create a new bandwidth package without leaving this edit modal.</p>
-                </div>
-
-                {mainWalletBalance !== null ? (
-                  <div className={`rounded-2xl border px-4 py-3 text-sm ${mainWalletBalance < 0 ? "border-rose-400/20 bg-rose-400/10 text-rose-200" : "border-sky-400/20 bg-sky-400/10 text-sky-200"}`}>
-                    Main wallet available: {formatTokenAmount(mainWalletBalance)} Mei
+              {editingUser?.isTesting ? (
+                <div className="panel-subtle space-y-3 p-4 sm:p-5">
+                  <div>
+                    <p className="metric-kicker">Testing Mode</p>
+                    <p className="mt-2 text-sm text-slate-400">
+                      This user is in testing mode, so funded bandwidth packages are disabled. Historical entries stay visible below for reference.
+                    </p>
                   </div>
-                ) : null}
-
-                <div className="grid gap-4 md:grid-cols-3">
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-medium text-slate-300">Bandwidth (GB)</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={allocationForm.bandwidthGb}
-                      onChange={(event) => setAllocationForm((current) => ({ ...current, bandwidthGb: Number(event.target.value) || 0 }))}
-                      className="input-shell"
-                    />
-                  </label>
-
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-medium text-slate-300">Tokens</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={allocationForm.tokenAmount}
-                      onChange={(event) => setAllocationForm((current) => ({ ...current, tokenAmount: Number(event.target.value) || 0 }))}
-                      className="input-shell"
-                    />
-                  </label>
-
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-medium text-slate-300">Expiry</span>
-                    <input
-                      type="datetime-local"
-                      required
-                      value={allocationForm.expiresAt}
-                      onChange={(event) => setAllocationForm((current) => ({ ...current, expiresAt: event.target.value }))}
-                      className="input-shell"
-                    />
-                  </label>
                 </div>
+              ) : (
+                <form className="panel-subtle space-y-4 p-4 sm:p-5" onSubmit={(event) => void submitAllocation(event)}>
+                  <div>
+                    <p className="metric-kicker">Add Bandwidth</p>
+                    <p className="mt-2 text-sm text-slate-400">Create a new bandwidth package without leaving this edit modal.</p>
+                  </div>
 
-                <div className="flex flex-wrap justify-end gap-3">
-                  <button type="submit" className="btn-primary">
-                    Add Bandwidth
-                  </button>
-                </div>
-              </form>
+                  {mainWalletBalance !== null ? (
+                    <div className={`rounded-2xl border px-4 py-3 text-sm ${mainWalletBalance < 0 ? "border-rose-400/20 bg-rose-400/10 text-rose-200" : "border-sky-400/20 bg-sky-400/10 text-sky-200"}`}>
+                      Main wallet available: {formatTokenAmount(mainWalletBalance)} Mei
+                    </div>
+                  ) : null}
+
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-medium text-slate-300">Bandwidth (GB)</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={allocationForm.bandwidthGb}
+                        onChange={(event) => setAllocationForm((current) => ({ ...current, bandwidthGb: Number(event.target.value) || 0 }))}
+                        className="input-shell"
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-medium text-slate-300">Tokens</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={allocationForm.tokenAmount}
+                        onChange={(event) => setAllocationForm((current) => ({ ...current, tokenAmount: Number(event.target.value) || 0 }))}
+                        className="input-shell"
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-medium text-slate-300">Expiry</span>
+                      <input
+                        type="datetime-local"
+                        required
+                        value={allocationForm.expiresAt}
+                        onChange={(event) => setAllocationForm((current) => ({ ...current, expiresAt: event.target.value }))}
+                        className="input-shell"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="flex flex-wrap justify-end gap-3">
+                    <button type="submit" className="btn-primary">
+                      Add Bandwidth
+                    </button>
+                  </div>
+                </form>
+              )}
 
               <div className="panel-subtle p-4 sm:p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1177,22 +1246,26 @@ export function UsersPage() {
                                 <Calendar className="h-3.5 w-3.5" />
                                 Update Expiry
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => editingUser && openAdjustBandwidthEntry(editingUser, allocation, "increase")}
-                                className="btn-secondary gap-2 px-3 py-2 text-xs"
-                              >
-                                <Plus className="h-3.5 w-3.5" />
-                                Increase
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => editingUser && openAdjustBandwidthEntry(editingUser, allocation, "reduce")}
-                                className="btn-secondary gap-2 px-3 py-2 text-xs"
-                              >
-                                <Minus className="h-3.5 w-3.5" />
-                                Reduce
-                              </button>
+                              {!editingUser?.isTesting ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => editingUser && openAdjustBandwidthEntry(editingUser, allocation, "increase")}
+                                    className="btn-secondary gap-2 px-3 py-2 text-xs"
+                                  >
+                                    <Plus className="h-3.5 w-3.5" />
+                                    Increase
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => editingUser && openAdjustBandwidthEntry(editingUser, allocation, "reduce")}
+                                    className="btn-secondary gap-2 px-3 py-2 text-xs"
+                                  >
+                                    <Minus className="h-3.5 w-3.5" />
+                                    Reduce
+                                  </button>
+                                </>
+                              ) : null}
                             </div>
                           </div>
                         </div>
@@ -1208,7 +1281,7 @@ export function UsersPage() {
             </div>
           ) : (
             <form className="space-y-4" onSubmit={(event) => void submitUser(event)}>
-              {mainWalletBalance !== null ? (
+              {!form.isTesting && mainWalletBalance !== null ? (
                 <div className={`rounded-2xl border px-4 py-3 text-sm ${mainWalletBalance < 0 ? "border-rose-400/20 bg-rose-400/10 text-rose-200" : "border-sky-400/20 bg-sky-400/10 text-sky-200"}`}>
                   Main wallet available: {formatTokenAmount(mainWalletBalance)} Mei
                 </div>
@@ -1235,41 +1308,63 @@ export function UsersPage() {
                 />
               </label>
 
-              <div className="grid gap-4 md:grid-cols-3">
-                <label className="block">
-                  <span className="mb-2 block text-sm font-medium text-slate-300">Initial Bandwidth (GB)</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={form.initialBandwidthGb}
-                    onChange={(event) => setForm((current) => ({ ...current, initialBandwidthGb: Number(event.target.value) || 0 }))}
-                    className="input-shell"
-                  />
-                </label>
+              <label className="flex items-center gap-3 rounded-2xl border border-amber-300/15 bg-amber-300/[0.06] px-4 py-3 text-sm text-amber-100">
+                <input
+                  type="checkbox"
+                  checked={form.isTesting}
+                  onChange={(event) => setForm((current) => ({
+                    ...current,
+                    isTesting: event.target.checked,
+                    initialBandwidthGb: event.target.checked ? 0 : current.initialBandwidthGb,
+                    initialTokenAmount: event.target.checked ? 0 : current.initialTokenAmount,
+                    initialExpiresAt: event.target.checked ? "" : current.initialExpiresAt
+                  }))}
+                  className="h-4 w-4 rounded border-white/20 bg-transparent"
+                />
+                Testing user
+              </label>
 
-                <label className="block">
-                  <span className="mb-2 block text-sm font-medium text-slate-300">Initial Tokens</span>
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={form.initialTokenAmount}
-                    onChange={(event) => setForm((current) => ({ ...current, initialTokenAmount: Number(event.target.value) || 0 }))}
-                    className="input-shell"
-                  />
-                </label>
+              {form.isTesting ? (
+                <div className="rounded-2xl border border-amber-300/20 bg-amber-300/[0.06] px-4 py-3 text-sm text-amber-100">
+                  Testing users skip token funding and bandwidth allocation on create, and they only deploy to testable nodes.
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-3">
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-medium text-slate-300">Initial Bandwidth (GB)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={form.initialBandwidthGb}
+                      onChange={(event) => setForm((current) => ({ ...current, initialBandwidthGb: Number(event.target.value) || 0 }))}
+                      className="input-shell"
+                    />
+                  </label>
 
-                <label className="block">
-                  <span className="mb-2 block text-sm font-medium text-slate-300">Initial Expiry</span>
-                  <input
-                    type="datetime-local"
-                    required
-                    value={form.initialExpiresAt}
-                    onChange={(event) => setForm((current) => ({ ...current, initialExpiresAt: event.target.value }))}
-                    className="input-shell"
-                  />
-                </label>
-              </div>
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-medium text-slate-300">Initial Tokens</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={form.initialTokenAmount}
+                      onChange={(event) => setForm((current) => ({ ...current, initialTokenAmount: Number(event.target.value) || 0 }))}
+                      className="input-shell"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-medium text-slate-300">Initial Expiry</span>
+                    <input
+                      type="datetime-local"
+                      required
+                      value={form.initialExpiresAt}
+                      onChange={(event) => setForm((current) => ({ ...current, initialExpiresAt: event.target.value }))}
+                      className="input-shell"
+                    />
+                  </label>
+                </div>
+              )}
 
               <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
                 <input

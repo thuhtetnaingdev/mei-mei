@@ -25,6 +25,7 @@ const emptyBootstrapForm = {
   password: "",
   location: "",
   publicHost: "",
+  isTestable: false,
   sshPort: "22",
   nodePort: "9090",
   singboxReloadCommand: "systemctl restart meimei-sing-box.service"
@@ -64,6 +65,7 @@ export function NodesPage() {
   const [nodeEditForm, setNodeEditForm] = useState({
     location: "",
     publicHost: "",
+    isTestable: false,
     bandwidthLimitGb: "0",
     expiresAt: ""
   });
@@ -115,6 +117,7 @@ export function NodesPage() {
     try {
       const response = await api.post<BootstrapResult>("/nodes/bootstrap", {
         ...form,
+        isTestable: form.isTestable,
         sshPort: Number(form.sshPort),
         nodePort: Number(form.nodePort)
       });
@@ -154,6 +157,7 @@ export function NodesPage() {
     setNodeEditForm({
       location: node.location ?? "",
       publicHost: node.publicHost ?? "",
+      isTestable: node.isTestable ?? false,
       bandwidthLimitGb: String(node.bandwidthLimitGb ?? 0),
       expiresAt: node.expiresAt ? node.expiresAt.slice(0, 16) : ""
     });
@@ -164,6 +168,7 @@ export function NodesPage() {
     setNodeEditForm({
       location: "",
       publicHost: "",
+      isTestable: false,
       bandwidthLimitGb: "0",
       expiresAt: ""
     });
@@ -178,6 +183,7 @@ export function NodesPage() {
     await api.patch(`/nodes/${editingNode.id}`, {
       location: nodeEditForm.location,
       publicHost: nodeEditForm.publicHost,
+      isTestable: nodeEditForm.isTestable,
       bandwidthLimitGb: Number(nodeEditForm.bandwidthLimitGb) || 0,
       expiresAt: nodeEditForm.expiresAt ? new Date(nodeEditForm.expiresAt).toISOString() : null
     });
@@ -580,6 +586,12 @@ export function NodesPage() {
                               <span className={`h-2 w-2 rounded-full ${node.enabled ? "bg-sky-400" : "bg-amber-300"}`} />
                               {node.enabled ? "enabled" : "disabled"}
                             </span>
+                            {node.isTestable ? (
+                              <span className="status-pill text-amber-200">
+                                <span className="h-2 w-2 rounded-full bg-amber-300" />
+                                testable
+                              </span>
+                            ) : null}
                           </div>
                           <p className="mt-1 text-sm text-slate-400">
                             {node.location || "Unknown region"} • {node.publicHost || "No public host"}
@@ -677,6 +689,16 @@ export function NodesPage() {
             ))}
           </div>
 
+          <label className="flex items-center gap-3 rounded-2xl border border-amber-300/15 bg-amber-300/[0.06] px-4 py-3 text-sm text-amber-100">
+            <input
+              type="checkbox"
+              checked={form.isTestable}
+              onChange={(event) => setForm((current) => ({ ...current, isTestable: event.target.checked }))}
+              className="h-4 w-4 rounded border-white/20 bg-transparent"
+            />
+            Testable node
+          </label>
+
           <div className="flex flex-wrap justify-end gap-3">
             <button type="button" onClick={() => setCreateNodeDialogOpen(false)} className="btn-secondary">
               Cancel
@@ -712,6 +734,15 @@ export function NodesPage() {
               onChange={(event) => setNodeEditForm((current) => ({ ...current, publicHost: event.target.value }))}
               className="input-shell"
             />
+          </label>
+          <label className="flex items-center gap-3 rounded-2xl border border-amber-300/15 bg-amber-300/[0.06] px-4 py-3 text-sm text-amber-100">
+            <input
+              type="checkbox"
+              checked={nodeEditForm.isTestable}
+              onChange={(event) => setNodeEditForm((current) => ({ ...current, isTestable: event.target.checked }))}
+              className="h-4 w-4 rounded border-white/20 bg-transparent"
+            />
+            Testable node
           </label>
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-slate-300">Bandwidth Limit (GB)</span>

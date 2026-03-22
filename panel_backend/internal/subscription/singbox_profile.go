@@ -20,7 +20,7 @@ func GenerateClashProfile(user models.User, nodes []models.Node, settings servic
 }
 
 func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings services.ProtocolSettings) map[string]interface{} {
-	availableNodes := filterAvailableNodes(nodes)
+	availableNodes := filterAvailableNodes(user, nodes)
 	proxyOutbounds := collectOutboundTags(user, availableNodes, settings)
 	urltestOutbounds := collectOutboundTags(user, availableNodes, settings)
 
@@ -179,7 +179,7 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 }
 
 func buildClashProfileConfig(user models.User, nodes []models.Node, settings services.ProtocolSettings) map[string]interface{} {
-	availableNodes := filterAvailableNodes(nodes)
+	availableNodes := filterAvailableNodes(user, nodes)
 	proxies := make([]map[string]interface{}, 0)
 	proxyNames := make([]string, 0)
 

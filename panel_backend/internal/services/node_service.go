@@ -51,6 +51,7 @@ type RegisterNodeInput struct {
 	BaseURL           string     `json:"baseUrl" binding:"required,url"`
 	Location          string     `json:"location"`
 	PublicHost        string     `json:"publicHost" binding:"required"`
+	IsTestable        bool       `json:"isTestable"`
 	VLESSPort         int        `json:"vlessPort"`
 	TUICPort          int        `json:"tuicPort"`
 	Hysteria2Port     int        `json:"hysteria2Port"`
@@ -69,6 +70,7 @@ type UpdateNodeInput struct {
 	ExpiresAt        *time.Time `json:"expiresAt"`
 	BandwidthLimitGB *int64     `json:"bandwidthLimitGb"`
 	Enabled          *bool      `json:"enabled"`
+	IsTestable       *bool      `json:"isTestable"`
 }
 
 type SyncPayload struct {
@@ -162,6 +164,7 @@ func (s *NodeService) StartBootstrap(input BootstrapNodeInput) *BootstrapJob {
 			Username:             input.Username,
 			Location:             input.Location,
 			PublicHost:           input.PublicHost,
+			IsTestable:           input.IsTestable,
 			SSHPort:              input.SSHPort,
 			NodePort:             input.NodePort,
 			SingboxReloadCommand: input.SingboxReloadCommand,
@@ -241,6 +244,7 @@ func (s *NodeService) Register(input RegisterNodeInput) (*models.Node, error) {
 		BaseURL:           input.BaseURL,
 		Location:          input.Location,
 		PublicHost:        input.PublicHost,
+		IsTestable:        input.IsTestable,
 		VLESSPort:         input.VLESSPort,
 		TUICPort:          input.TUICPort,
 		Hysteria2Port:     input.Hysteria2Port,
@@ -304,6 +308,7 @@ func (s *NodeService) Update(id string, input UpdateNodeInput) (*models.Node, er
 		return nil, err
 	}
 	previousEnabled := node.Enabled
+	previousIsTestable := node.IsTestable
 
 	if input.Location != nil {
 		node.Location = *input.Location
@@ -317,16 +322,23 @@ func (s *NodeService) Update(id string, input UpdateNodeInput) (*models.Node, er
 	if input.Enabled != nil {
 		node.Enabled = *input.Enabled
 	}
+	if input.IsTestable != nil {
+		node.IsTestable = *input.IsTestable
+	}
 	node.ExpiresAt = input.ExpiresAt
 
 	if err := s.db.Save(&node).Error; err != nil {
 		return nil, err
 	}
 
-	if input.Enabled != nil && previousEnabled != node.Enabled {
+	if (input.Enabled != nil && previousEnabled != node.Enabled) || (input.IsTestable != nil && previousIsTestable != node.IsTestable) {
 		if err := s.syncNodeEnabledState(&node); err != nil {
 			node.Enabled = previousEnabled
-			_ = s.db.Model(&node).Update("enabled", previousEnabled).Error
+			node.IsTestable = previousIsTestable
+			_ = s.db.Model(&node).Updates(map[string]interface{}{
+				"enabled":     previousEnabled,
+				"is_testable": previousIsTestable,
+			}).Error
 			return nil, err
 		}
 	}
@@ -530,6 +542,9 @@ func (s *NodeService) syncNodeEnabledState(node *models.Node) error {
 func (s *NodeService) syncNode(node models.Node, users []models.User) error {
 	syncUsers := make([]SyncUser, 0, len(users))
 	for _, user := range users {
+		if user.IsTesting && !node.IsTestable {
+			continue
+		}
 		syncUsers = append(syncUsers, SyncUser{
 			ID:               user.ID,
 			UUID:             user.UUID,

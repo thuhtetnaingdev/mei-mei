@@ -355,6 +355,7 @@ func (h *Handler) createUser(c *gin.Context) {
 		return
 	}
 
+	h.syncActiveUsersBestEffort()
 	c.JSON(http.StatusCreated, user)
 }
 
@@ -460,6 +461,7 @@ func (h *Handler) addUserBandwidthAllocation(c *gin.Context) {
 		return
 	}
 
+	h.syncActiveUsersBestEffort()
 	c.JSON(http.StatusCreated, user)
 }
 
@@ -476,6 +478,7 @@ func (h *Handler) updateUserBandwidthAllocation(c *gin.Context) {
 		return
 	}
 
+	h.syncActiveUsersBestEffort()
 	c.JSON(http.StatusOK, user)
 }
 
@@ -492,6 +495,7 @@ func (h *Handler) adjustUserBandwidthAllocation(c *gin.Context) {
 		return
 	}
 
+	h.syncActiveUsersBestEffort()
 	c.JSON(http.StatusOK, user)
 }
 
@@ -508,6 +512,7 @@ func (h *Handler) reduceUserBandwidthAllocation(c *gin.Context) {
 		return
 	}
 
+	h.syncActiveUsersBestEffort()
 	c.JSON(http.StatusOK, user)
 }
 
@@ -524,6 +529,7 @@ func (h *Handler) updateUser(c *gin.Context) {
 		return
 	}
 
+	h.syncActiveUsersBestEffort()
 	c.JSON(http.StatusOK, user)
 }
 
@@ -532,7 +538,35 @@ func (h *Handler) deleteUser(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
 	}
+	h.syncActiveUsersBestEffort()
 	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) syncActiveUsersBestEffort() {
+	users, err := h.userService.ActiveUsers()
+	if err != nil {
+		log.Printf("[user-sync] loading active users failed: %v", err)
+		return
+	}
+
+	results, err := h.nodeService.SyncAllUsers(users)
+	if err != nil {
+		log.Printf("[user-sync] syncing nodes failed: %v", err)
+		return
+	}
+
+	for _, result := range results {
+		status, _ := result["status"].(string)
+		if status == "success" {
+			continue
+		}
+		nodeName, _ := result["node"].(string)
+		errorMessage, _ := result["error"].(string)
+		if errorMessage == "" {
+			errorMessage = "sync failed"
+		}
+		log.Printf("[user-sync] node %s sync failed: %s", nodeName, errorMessage)
+	}
 }
 
 func (h *Handler) registerNode(c *gin.Context) {

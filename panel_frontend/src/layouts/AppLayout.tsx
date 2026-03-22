@@ -72,7 +72,7 @@ export function AppLayout() {
           </div>
         </aside>
 
-        <div className="min-w-0 min-h-0">
+        <div className="min-w-0 min-h-0 overflow-x-hidden">
           <div className="flex h-full min-h-0 flex-col">
             <header className="panel-surface z-40 mb-4 shrink-0 p-3 sm:p-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -119,8 +119,8 @@ export function AppLayout() {
             ) : null}
             </header>
 
-            <main className="min-h-0 flex-1 overflow-y-auto">
-              <div className="space-y-4 pb-1 pr-1">
+            <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+              <div className="min-w-0 space-y-4 pb-1 pr-1">
                 <Outlet />
               </div>
             </main>

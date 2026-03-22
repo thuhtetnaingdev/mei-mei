@@ -46,6 +46,7 @@ type UserBandwidthAllocationUpdateInput struct {
 type CreateUserInput struct {
 	Email                string                         `json:"email" binding:"required,email"`
 	Enabled              *bool                          `json:"enabled"`
+	IsTesting            *bool                          `json:"isTesting"`
 	ExpiresAt            *time.Time                     `json:"expiresAt"`
 	BandwidthLimitGB     int64                          `json:"bandwidthLimitGb"`
 	Notes                string                         `json:"notes"`
@@ -53,9 +54,10 @@ type CreateUserInput struct {
 }
 
 type UpdateUserInput struct {
-	Email   *string `json:"email"`
-	Enabled *bool   `json:"enabled"`
-	Notes   *string `json:"notes"`
+	Email     *string `json:"email"`
+	Enabled   *bool   `json:"enabled"`
+	IsTesting *bool   `json:"isTesting"`
+	Notes     *string `json:"notes"`
 }
 
 type allocationDistributionSnapshot struct {
@@ -69,8 +71,15 @@ func NewUserService(db *gorm.DB) *UserService {
 }
 
 func (s *UserService) Create(input CreateUserInput) (*models.User, error) {
-	if err := validateAllocationInputs(input.BandwidthAllocations); err != nil {
-		return nil, err
+	isTesting := false
+	if input.IsTesting != nil {
+		isTesting = *input.IsTesting
+	}
+
+	if !isTesting {
+		if err := validateAllocationInputs(input.BandwidthAllocations); err != nil {
+			return nil, err
+		}
 	}
 
 	enabled := true
@@ -79,10 +88,11 @@ func (s *UserService) Create(input CreateUserInput) (*models.User, error) {
 	}
 
 	user := models.User{
-		UUID:    uuid.NewString(),
-		Email:   input.Email,
-		Enabled: enabled,
-		Notes:   input.Notes,
+		UUID:      uuid.NewString(),
+		Email:     input.Email,
+		Enabled:   enabled,
+		IsTesting: isTesting,
+		Notes:     input.Notes,
 	}
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
@@ -91,6 +101,9 @@ func (s *UserService) Create(input CreateUserInput) (*models.User, error) {
 		}
 
 		allocations := normalizeAllocationInputs(input.BandwidthAllocations, input.BandwidthLimitGB, input.ExpiresAt)
+		if user.IsTesting {
+			allocations = nil
+		}
 		if err := s.createAllocations(tx, user.ID, allocations, "initial user allocation"); err != nil {
 			return err
 		}
@@ -212,6 +225,9 @@ func (s *UserService) Update(id string, input UpdateUserInput) (*models.User, er
 		if input.Enabled != nil {
 			user.Enabled = *input.Enabled
 		}
+		if input.IsTesting != nil {
+			user.IsTesting = *input.IsTesting
+		}
 		if input.Notes != nil {
 			user.Notes = *input.Notes
 		}
@@ -247,6 +263,9 @@ func (s *UserService) AddBandwidthAllocation(userID string, input UserBandwidthA
 		var user models.User
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, "id = ?", userID).Error; err != nil {
 			return err
+		}
+		if user.IsTesting {
+			return errors.New("testing users do not accept funded bandwidth packages")
 		}
 
 		if err := s.createAllocations(tx, user.ID, []UserBandwidthAllocationInput{input}, "bandwidth top-up"); err != nil {
@@ -546,7 +565,7 @@ func (s *UserService) ActiveUsers() ([]models.User, error) {
 	now := time.Now()
 	active := make([]models.User, 0, len(users))
 	for _, user := range users {
-		if user.Enabled && hasActiveBandwidth(user.BandwidthAllocations, now) {
+		if user.Enabled && (user.IsTesting || hasActiveBandwidth(user.BandwidthAllocations, now)) {
 			active = append(active, user)
 		}
 	}
@@ -590,6 +609,14 @@ func (s *UserService) RecordUsageOnNode(uuid string, nodeName string, bytes int6
 			Where("user_id = ?", user.ID).
 			Find(&allocations).Error; err != nil {
 			return err
+		}
+
+		if user.IsTesting {
+			user.BandwidthUsedBytes += bytes
+			if err := s.refreshUserSummaryWithAllocationsTx(tx, &user, allocations); err != nil {
+				return err
+			}
+			return tx.Save(&user).Error
 		}
 
 		if err := s.settleExpiredAllocationsForUserTx(tx, user.ID, allocations, time.Now()); err != nil {
@@ -1180,6 +1207,9 @@ func (s *UserService) createUserRecordTx(tx *gorm.DB, userID uint, action, title
 
 func (s *UserService) describeCreateRecord(input CreateUserInput, user *models.User) string {
 	details := fmt.Sprintf("Email: %s", user.Email)
+	if user.IsTesting {
+		details += " | Testing: true"
+	}
 	if input.Notes != "" {
 		details += fmt.Sprintf(" | Notes: %s", input.Notes)
 	}
@@ -1194,7 +1224,11 @@ func (s *UserService) describeCreateRecord(input CreateUserInput, user *models.U
 }
 
 func (s *UserService) describeUpdateRecord(input UpdateUserInput, user *models.User) string {
-	parts := []string{fmt.Sprintf("Email: %s", user.Email), fmt.Sprintf("Enabled: %t", user.Enabled)}
+	parts := []string{
+		fmt.Sprintf("Email: %s", user.Email),
+		fmt.Sprintf("Enabled: %t", user.Enabled),
+		fmt.Sprintf("Testing: %t", user.IsTesting),
+	}
 	if user.Notes != "" {
 		parts = append(parts, fmt.Sprintf("Notes: %s", user.Notes))
 	}
