@@ -3,6 +3,7 @@ package services
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"gorm.io/gorm"
 	"panel_backend/internal/db"
@@ -103,6 +104,32 @@ func TestRecordUsageOnNodeForTestingUserSkipsDistribution(t *testing.T) {
 	}
 	if rewardCount != 0 {
 		t.Fatalf("expected no miner rewards, got %d", rewardCount)
+	}
+}
+
+func TestAddBandwidthAllocationKeepsTotalPackageLimitForProgress(t *testing.T) {
+	_, userService := newTestUserService(t)
+
+	expiresAt := time.Now().Add(24 * time.Hour)
+	user := &models.User{
+		BandwidthUsedBytes: 49 * bytesPerGB,
+		BandwidthAllocations: []models.UserBandwidthAllocation{
+			{
+				TotalBandwidthBytes:     100 * bytesPerGB,
+				RemainingBandwidthBytes: 51 * bytesPerGB,
+				RemainingTokens:         51,
+				ExpiresAt:               &expiresAt,
+			},
+		},
+	}
+
+	userService.hydrateUserSummary(user)
+
+	if user.BandwidthLimitGB != 100 {
+		t.Fatalf("expected summarized bandwidth limit to stay at total package size, got %d", user.BandwidthLimitGB)
+	}
+	if user.TokenBalance != 51 {
+		t.Fatalf("expected remaining token balance to stay based on remaining package amount, got %f", user.TokenBalance)
 	}
 }
 

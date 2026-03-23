@@ -94,6 +94,13 @@ func Generate(nodeName, publicHost string, realityPrivateKey, realityServerName,
 	}
 
 	for _, plan := range shadowsocksPlans {
+		ssUsers := make([]map[string]interface{}, 0, len(plan.Users))
+		for _, user := range plan.Users {
+			ssUsers = append(ssUsers, map[string]interface{}{
+				"name":     user.Name,
+				"password": user.Password,
+			})
+		}
 		inbounds = append(inbounds, map[string]interface{}{
 			"type":        "shadowsocks",
 			"tag":         plan.Tag,
@@ -101,7 +108,8 @@ func Generate(nodeName, publicHost string, realityPrivateKey, realityServerName,
 			"listen_port": plan.Port,
 			"network":     "tcp",
 			"method":      shadowsocks2022Method,
-			"password":    plan.Password,
+			"password":    plan.ServerPassword,
+			"users":       ssUsers,
 			"multiplex": map[string]interface{}{
 				"enabled": true,
 			},

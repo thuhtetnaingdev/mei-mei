@@ -73,6 +73,7 @@ type UpdateNodeInput struct {
 	BandwidthLimitGB *int64     `json:"bandwidthLimitGb"`
 	Enabled          *bool      `json:"enabled"`
 	IsTestable       *bool      `json:"isTestable"`
+	MinerID          *uint      `json:"minerId"`
 }
 
 type SyncPayload struct {
@@ -166,6 +167,17 @@ func (s *NodeService) GetDB() *gorm.DB {
 	return s.db
 }
 
+func (s *NodeService) validateMinerID(minerID uint) error {
+	var miner models.Miner
+	if err := s.db.First(&miner, "id = ?", minerID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.New("selected miner not found")
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *NodeService) StartBootstrap(input BootstrapNodeInput) *BootstrapJob {
 	job := &BootstrapJob{
 		ID:        uuid.NewString(),
@@ -175,6 +187,7 @@ func (s *NodeService) StartBootstrap(input BootstrapNodeInput) *BootstrapJob {
 		StartedAt: time.Now(),
 		Input: BootstrapNodeInput{
 			Name:                 input.Name,
+			MinerID:              input.MinerID,
 			IP:                   input.IP,
 			Username:             input.Username,
 			Location:             input.Location,
@@ -333,6 +346,12 @@ func (s *NodeService) Update(id string, input UpdateNodeInput) (*models.Node, er
 	}
 	if input.BandwidthLimitGB != nil {
 		node.BandwidthLimitGB = *input.BandwidthLimitGB
+	}
+	if input.MinerID != nil {
+		if err := s.validateMinerID(*input.MinerID); err != nil {
+			return nil, err
+		}
+		node.MinerID = input.MinerID
 	}
 	if input.Enabled != nil {
 		node.Enabled = *input.Enabled

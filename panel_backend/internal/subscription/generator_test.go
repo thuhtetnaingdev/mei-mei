@@ -1,10 +1,11 @@
 package subscription
 
 import (
-	"encoding/base64"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
+	"net/url"
 
 	"gopkg.in/yaml.v3"
 	"panel_backend/internal/models"
@@ -35,18 +36,19 @@ func TestGenerateNodeLinksIncludesUserSpecificShadowsocksLink(t *testing.T) {
 		t.Fatalf("invalid shadowsocks link: %s", shadowsocksLink)
 	}
 
-	credentials, err := base64.RawURLEncoding.DecodeString(parts[0])
+	credentials, err := url.QueryUnescape(parts[0])
 	if err != nil {
 		t.Fatalf("failed to decode credentials: %v", err)
 	}
 
-	expectedCredentials := shadowsocks2022Method + ":" + shadowsocksUserPassword(node, user.UUID)
-	if string(credentials) != expectedCredentials {
-		t.Fatalf("unexpected shadowsocks credentials: got %q want %q", string(credentials), expectedCredentials)
+	expectedCredentials := shadowsocks2022Method + ":" + shadowsocksCombinedPassword(node, user.UUID)
+	if credentials != expectedCredentials {
+		t.Fatalf("unexpected shadowsocks credentials: got %q want %q", credentials, expectedCredentials)
 	}
 
-	if !strings.Contains(parts[1], ":10000#") {
-		t.Fatalf("expected user-specific shadowsocks port in link, got %s", shadowsocksLink)
+	expectedPort := shadowsocksPort(node)
+	if !strings.Contains(parts[1], ":"+strconv.Itoa(expectedPort)+"#") {
+		t.Fatalf("expected shared shadowsocks port in link, got %s", shadowsocksLink)
 	}
 }
 
@@ -66,8 +68,8 @@ func TestGenerateSingboxProfileIncludesMatchingShadowsocksOutbound(t *testing.T)
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	expectedPort := float64(60001)
-	expectedPassword := shadowsocksUserPassword(node, user.UUID)
+	expectedPort := float64(shadowsocksPort(node))
+	expectedPassword := shadowsocksCombinedPassword(node, user.UUID)
 
 	for _, outbound := range profile.Outbounds {
 		if outbound["type"] != "shadowsocks" {

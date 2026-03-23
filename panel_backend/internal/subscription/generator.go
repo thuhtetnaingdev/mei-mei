@@ -99,7 +99,7 @@ func GenerateNodeLinks(user models.User, nodes []models.Node, settings services.
 
 		shadowsocks := buildShadowsocksVariant(node, user)
 		if shadowsocks.Port > 0 {
-			credentials := base64.RawURLEncoding.EncodeToString([]byte(shadowsocks2022Method + ":" + shadowsocks.Password))
+			credentials := url.QueryEscape(shadowsocks2022Method) + ":" + url.QueryEscape(shadowsocks.Password)
 			link := fmt.Sprintf(
 				"ss://%s@%s:%d#%s-SHADOWSOCKS",
 				credentials,

@@ -68,20 +68,22 @@ func backfillUserSummaries(conn *gorm.DB) error {
 
 	now := time.Now()
 	for _, user := range users {
-		totalRemainingBytes := int64(0)
+		totalAllocatedBytes := int64(0)
 		totalRemainingTokens := 0.0
 		var latestExpiry *time.Time
 
 		for _, allocation := range user.BandwidthAllocations {
-			if allocation.RemainingBandwidthBytes <= 0 {
+			if allocation.TotalBandwidthBytes <= 0 {
 				continue
 			}
 			if allocation.ExpiresAt != nil && !allocation.ExpiresAt.After(now) {
 				continue
 			}
 
-			totalRemainingBytes += allocation.RemainingBandwidthBytes
-			totalRemainingTokens += allocation.RemainingTokens
+			totalAllocatedBytes += allocation.TotalBandwidthBytes
+			if allocation.RemainingTokens > 0 {
+				totalRemainingTokens += allocation.RemainingTokens
+			}
 			if allocation.ExpiresAt != nil && (latestExpiry == nil || allocation.ExpiresAt.After(*latestExpiry)) {
 				expiry := *allocation.ExpiresAt
 				latestExpiry = &expiry
@@ -89,8 +91,8 @@ func backfillUserSummaries(conn *gorm.DB) error {
 		}
 
 		bandwidthLimitGB := int64(0)
-		if totalRemainingBytes > 0 {
-			bandwidthLimitGB = int64(math.Ceil(float64(totalRemainingBytes) / float64(bytesPerGB)))
+		if totalAllocatedBytes > 0 {
+			bandwidthLimitGB = int64(math.Ceil(float64(totalAllocatedBytes) / float64(bytesPerGB)))
 		}
 
 		updates := map[string]any{

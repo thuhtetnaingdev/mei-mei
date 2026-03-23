@@ -11,14 +11,8 @@ import (
 const (
 	portRangeStart                = 20000
 	portRangeEnd                  = 59999
-	shadowsocks2022Method         = "2022-blake3-chacha20-poly1305"
-	shadowsocksPrimaryPortStart   = 10000
-	shadowsocksPrimaryPortEnd     = 19999
-	shadowsocksSecondaryPortStart = 60000
-	shadowsocksSecondaryPortEnd   = 65023
-	shadowsocksPrimaryPortSlots   = shadowsocksPrimaryPortEnd - shadowsocksPrimaryPortStart + 1
-	shadowsocksSecondaryPortSlots = shadowsocksSecondaryPortEnd - shadowsocksSecondaryPortStart + 1
-	shadowsocksDedicatedPortSlots = shadowsocksPrimaryPortSlots + shadowsocksSecondaryPortSlots
+	shadowsocks2022Method         = "2022-blake3-aes-128-gcm"
+	shadowsocks2022KeyLengthBytes = 16
 )
 
 type VLESSInboundPlan struct {
@@ -37,12 +31,18 @@ type TUICInboundPlan struct {
 func (p TUICInboundPlan) GetPort() int { return p.Port }
 
 type ShadowsocksInboundPlan struct {
-	Tag      string
-	Port     int
-	Password string
+	Tag            string
+	Port           int
+	ServerPassword string
+	Users          []ShadowsocksInboundUser
 }
 
 func (p ShadowsocksInboundPlan) GetPort() int { return p.Port }
+
+type ShadowsocksInboundUser struct {
+	Name     string
+	Password string
+}
 
 type Hysteria2InboundPlan struct {
 	Tag           string
@@ -92,20 +92,35 @@ func BuildTransportLayout(nodeName, publicHost string, realitySNIs, masquerades 
 }
 
 func BuildShadowsocksInboundPlans(nodeName, publicHost string, users []User) []ShadowsocksInboundPlan {
-	plans := make([]ShadowsocksInboundPlan, 0, len(users))
+	plan := ShadowsocksInboundPlan{
+		Tag:            "shadowsocks-in",
+		Port:           ShadowsocksPort(nodeName, publicHost),
+		ServerPassword: ShadowsocksServerPassword(nodeName, publicHost),
+		Users:          make([]ShadowsocksInboundUser, 0, len(users)),
+	}
 	for _, user := range users {
 		if !user.Enabled {
 			continue
 		}
 
-		plans = append(plans, ShadowsocksInboundPlan{
-			Tag:      fmt.Sprintf("shadowsocks-in-%d", user.ID),
-			Port:     shadowsocksPortForUserID(user.ID),
+		plan.Users = append(plan.Users, ShadowsocksInboundUser{
+			Name:     user.Email,
 			Password: ShadowsocksUserPassword(nodeName, publicHost, user.UUID),
 		})
 	}
 
-	return plans
+	if len(plan.Users) == 0 {
+		return nil
+	}
+	return []ShadowsocksInboundPlan{plan}
+}
+
+func ShadowsocksServerPassword(nodeName, publicHost string) string {
+	return deriveShadowsocks2022Key("server", nodeName, publicHost, "shared")
+}
+
+func ShadowsocksPort(nodeName, publicHost string) int {
+	return stableRandomPort(nodeName, publicHost, "shadowsocks", map[int]struct{}{})
 }
 
 func ShadowsocksUserPassword(nodeName, publicHost, userUUID string) string {
@@ -114,7 +129,7 @@ func ShadowsocksUserPassword(nodeName, publicHost, userUUID string) string {
 
 func deriveShadowsocks2022Key(scope, nodeName, publicHost, identity string) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("ss2022|%s|%s|%s|%s", scope, nodeName, publicHost, identity)))
-	return base64.StdEncoding.EncodeToString(sum[:])
+	return base64.StdEncoding.EncodeToString(sum[:shadowsocks2022KeyLengthBytes])
 }
 
 func obfuscationPassword(nodeName, publicHost, target string, index int) string {
@@ -135,17 +150,4 @@ func stableRandomPort(nodeName, publicHost, key string, usedPorts map[int]struct
 		return port
 	}
 	return portRangeStart
-}
-
-func shadowsocksPortForUserID(userID uint) int {
-	if userID == 0 {
-		return shadowsocksPrimaryPortStart
-	}
-
-	slot := int((userID - 1) % shadowsocksDedicatedPortSlots)
-	if slot < shadowsocksPrimaryPortSlots {
-		return shadowsocksPrimaryPortStart + slot
-	}
-
-	return shadowsocksSecondaryPortStart + (slot - shadowsocksPrimaryPortSlots)
 }

@@ -1341,31 +1341,10 @@ func (s *UserService) refreshUserSummaryTx(tx *gorm.DB, user *models.User) error
 }
 
 func (s *UserService) refreshUserSummaryWithAllocationsTx(_ *gorm.DB, user *models.User, allocations []models.UserBandwidthAllocation) error {
-	now := time.Now()
-	totalRemainingBytes := int64(0)
-	totalRemainingTokens := 0.0
-	var latestExpiry *time.Time
-
-	for _, allocation := range allocations {
-		if allocation.RemainingBandwidthBytes <= 0 {
-			continue
-		}
-		if allocation.ExpiresAt != nil && !allocation.ExpiresAt.After(now) {
-			continue
-		}
-
-		totalRemainingBytes += allocation.RemainingBandwidthBytes
-		totalRemainingTokens += allocation.RemainingTokens
-		if allocation.ExpiresAt != nil {
-			if latestExpiry == nil || allocation.ExpiresAt.After(*latestExpiry) {
-				expiry := *allocation.ExpiresAt
-				latestExpiry = &expiry
-			}
-		}
-	}
+	totalAllocatedBytes, totalRemainingTokens, latestExpiry := summarizeActiveAllocations(allocations, time.Now())
 
 	user.TokenBalance = totalRemainingTokens
-	user.BandwidthLimitGB = bytesToRoundedGB(totalRemainingBytes)
+	user.BandwidthLimitGB = bytesToRoundedGB(totalAllocatedBytes)
 	user.ExpiresAt = latestExpiry
 	user.BandwidthAllocations = allocations
 	return nil
@@ -1426,6 +1405,34 @@ func hasActiveBandwidth(allocations []models.UserBandwidthAllocation, now time.T
 		return true
 	}
 	return false
+}
+
+func summarizeActiveAllocations(allocations []models.UserBandwidthAllocation, now time.Time) (int64, float64, *time.Time) {
+	totalAllocatedBytes := int64(0)
+	totalRemainingTokens := 0.0
+	var latestExpiry *time.Time
+
+	for _, allocation := range allocations {
+		if allocation.TotalBandwidthBytes <= 0 {
+			continue
+		}
+		if allocation.ExpiresAt != nil && !allocation.ExpiresAt.After(now) {
+			continue
+		}
+
+		totalAllocatedBytes += allocation.TotalBandwidthBytes
+		if allocation.RemainingTokens > 0 {
+			totalRemainingTokens += allocation.RemainingTokens
+		}
+		if allocation.ExpiresAt != nil {
+			if latestExpiry == nil || allocation.ExpiresAt.After(*latestExpiry) {
+				expiry := *allocation.ExpiresAt
+				latestExpiry = &expiry
+			}
+		}
+	}
+
+	return totalAllocatedBytes, totalRemainingTokens, latestExpiry
 }
 
 func bytesToRoundedGB(bytes int64) int64 {

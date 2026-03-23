@@ -33,6 +33,7 @@ const (
 
 type BootstrapNodeInput struct {
 	Name                 string `json:"name" binding:"required"`
+	MinerID              uint   `json:"minerId" binding:"required"`
 	IP                   string `json:"ip" binding:"required,ip"`
 	Username             string `json:"username" binding:"required"`
 	Password             string `json:"password" binding:"required"`
@@ -79,6 +80,9 @@ func (s *NodeService) bootstrapAndRegister(input BootstrapNodeInput, jobID strin
 	}
 
 	normalizeBootstrapInput(&input)
+	if err := s.validateMinerID(input.MinerID); err != nil {
+		return nil, err
+	}
 	addLog("bootstrap started for node %s (%s)", input.Name, input.IP)
 
 	addStep("connecting to VPS over SSH with password")
@@ -281,6 +285,7 @@ func installAuthorizedKey(client *ssh.Client, password string, authorizedKey str
 func (s *NodeService) upsertBootstrapNodeRecord(input BootstrapNodeInput, artifact *bootstrapArtifact) (*models.Node, error) {
 	baseURL := fmt.Sprintf("http://%s:%d", input.IP, input.NodePort)
 	node := models.Node{
+		MinerID:           &input.MinerID,
 		Name:              input.Name,
 		BaseURL:           baseURL,
 		Location:          input.Location,

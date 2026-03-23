@@ -102,8 +102,10 @@ func TestApplyUsesRequestedNodeNameForGeneratedTransports(t *testing.T) {
 
 	expectedLayout := singbox.BuildTransportLayout(req.NodeName, "node.example.com", req.RealitySNIs, req.Hysteria2Masquerades)
 	unexpectedLayout := singbox.BuildTransportLayout("host-node-name", "node.example.com", req.RealitySNIs, req.Hysteria2Masquerades)
-	expectedPassword := singbox.ShadowsocksUserPassword(req.NodeName, "node.example.com", "user-1")
-	unexpectedPassword := singbox.ShadowsocksUserPassword("host-node-name", "node.example.com", "user-1")
+	expectedServerPassword := singbox.ShadowsocksServerPassword(req.NodeName, "node.example.com")
+	unexpectedServerPassword := singbox.ShadowsocksServerPassword("host-node-name", "node.example.com")
+	expectedUserPassword := singbox.ShadowsocksUserPassword(req.NodeName, "node.example.com", "user-1")
+	unexpectedUserPassword := singbox.ShadowsocksUserPassword("host-node-name", "node.example.com", "user-1")
 	configText := string(payload)
 
 	if !strings.Contains(configText, `"listen_port": `+strconv.Itoa(expectedLayout.VLESS[0].Port)) {
@@ -112,10 +114,16 @@ func TestApplyUsesRequestedNodeNameForGeneratedTransports(t *testing.T) {
 	if strings.Contains(configText, `"listen_port": `+strconv.Itoa(unexpectedLayout.VLESS[0].Port)) {
 		t.Fatalf("generated config unexpectedly included host node-name port %d", unexpectedLayout.VLESS[0].Port)
 	}
-	if !strings.Contains(configText, expectedPassword) {
-		t.Fatalf("generated config did not include requested node-name shadowsocks password")
+	if !strings.Contains(configText, expectedServerPassword) {
+		t.Fatalf("generated config did not include requested node-name shadowsocks server password")
 	}
-	if strings.Contains(configText, unexpectedPassword) {
-		t.Fatalf("generated config unexpectedly included host node-name shadowsocks password")
+	if !strings.Contains(configText, expectedUserPassword) {
+		t.Fatalf("generated config did not include requested node-name shadowsocks user password")
+	}
+	if strings.Contains(configText, unexpectedServerPassword) {
+		t.Fatalf("generated config unexpectedly included host node-name shadowsocks server password")
+	}
+	if strings.Contains(configText, unexpectedUserPassword) {
+		t.Fatalf("generated config unexpectedly included host node-name shadowsocks user password")
 	}
 }

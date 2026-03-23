@@ -1,9 +1,9 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Globe, PauseCircle, PlayCircle, Plus, RefreshCw, ServerCog, ShieldCheck, Trash2, Wrench } from "lucide-react";
+import { ExternalLink, Globe, PauseCircle, PlayCircle, Plus, RefreshCw, Trash2, Wrench } from "lucide-react";
 import api from "../api/client";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { SectionCard } from "../components/SectionCard";
-import type { Node, NodeDiagnosticResult } from "../types";
+import type { Miner, Node, NodeDiagnosticResult } from "../types";
 
 interface BootstrapResult {
   id: string;
@@ -35,6 +35,7 @@ interface SyncNodesResponse {
 
 const emptyBootstrapForm = {
   name: "",
+  minerId: "",
   ip: "",
   username: "",
   password: "",
@@ -63,6 +64,7 @@ function getRequestErrorMessage(error: unknown, fallback: string) {
 
 export function NodesPage() {
   const [nodes, setNodes] = useState<Node[]>([]);
+  const [miners, setMiners] = useState<Miner[]>([]);
   const [bootstrapLog, setBootstrapLog] = useState<string[]>([]);
   const [bootstrapJobId, setBootstrapJobId] = useState("");
   const [isBootstrapping, setIsBootstrapping] = useState(false);
@@ -81,15 +83,17 @@ export function NodesPage() {
     location: "",
     publicHost: "",
     isTestable: false,
+    minerId: "",
     bandwidthLimitGb: "0",
     expiresAt: ""
   });
   const [form, setForm] = useState(emptyBootstrapForm);
 
   const loadNodes = () => api.get<Node[]>("/nodes").then((res) => setNodes(res.data));
+  const loadMiners = () => api.get<Miner[]>("/miners").then((res) => setMiners(res.data));
 
   useEffect(() => {
-    void loadNodes().catch(() => undefined);
+    void Promise.all([loadNodes(), loadMiners()]).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -132,6 +136,7 @@ export function NodesPage() {
     try {
       const response = await api.post<BootstrapResult>("/nodes/bootstrap", {
         ...form,
+        minerId: Number(form.minerId),
         isTestable: form.isTestable,
         sshPort: Number(form.sshPort),
         nodePort: Number(form.nodePort)
@@ -182,6 +187,7 @@ export function NodesPage() {
       location: node.location ?? "",
       publicHost: node.publicHost ?? "",
       isTestable: node.isTestable ?? false,
+      minerId: node.minerId ? String(node.minerId) : "",
       bandwidthLimitGb: String(node.bandwidthLimitGb ?? 0),
       expiresAt: node.expiresAt ? node.expiresAt.slice(0, 16) : ""
     });
@@ -193,6 +199,7 @@ export function NodesPage() {
       location: "",
       publicHost: "",
       isTestable: false,
+      minerId: "",
       bandwidthLimitGb: "0",
       expiresAt: ""
     });
@@ -208,6 +215,7 @@ export function NodesPage() {
       location: nodeEditForm.location,
       publicHost: nodeEditForm.publicHost,
       isTestable: nodeEditForm.isTestable,
+      minerId: Number(nodeEditForm.minerId),
       bandwidthLimitGb: Number(nodeEditForm.bandwidthLimitGb) || 0,
       expiresAt: nodeEditForm.expiresAt ? new Date(nodeEditForm.expiresAt).toISOString() : null
     });
@@ -325,7 +333,14 @@ export function NodesPage() {
     if (!value) {
       return "Never";
     }
-    return new Date(value).toLocaleString();
+
+    return new Intl.DateTimeFormat(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    }).format(new Date(value));
   };
 
   const formatCompactDateTime = (value?: string | null) => {
@@ -341,10 +356,19 @@ export function NodesPage() {
     }).format(new Date(value));
   };
 
+  const formatStatusLabel = (value?: string | null) => {
+    if (!value) {
+      return "Unknown";
+    }
+
+    return value
+      .replace(/[_-]+/g, " ")
+      .replace(/\b\w/g, (character) => character.toUpperCase());
+  };
+
   const onlineNodes = nodes.filter((node) => node.healthStatus === "online").length;
   const offlineNodes = nodes.filter((node) => node.healthStatus === "offline").length;
   const enabledNodes = nodes.filter((node) => node.enabled).length;
-  const disabledNodes = nodes.filter((node) => !node.enabled).length;
   const verifiedNodes = nodes.filter((node) => node.syncVerificationStatus === "verified").length;
   const healthyDiagnostics = diagnostics.filter((entry) => entry.qualityStatus === "healthy").length;
   const degradedDiagnostics = diagnostics.filter((entry) => entry.qualityStatus === "degraded").length;
@@ -364,88 +388,110 @@ export function NodesPage() {
     return `${value >= 100 ? value.toFixed(0) : value >= 10 ? value.toFixed(1) : value.toFixed(2)} Mbps`;
   };
 
-  return (
-    <div className="space-y-4">
-      <section className="grid gap-3 xl:grid-cols-[minmax(0,1.1fr),minmax(320px,0.9fr)]">
-        <SectionCard
-          eyebrow="Node Fleet"
-          title="Operate VPS nodes"
-          description="Provision new VPN nodes from a modal flow, keep metadata tidy, and expose health status from a denser infrastructure workspace."
-          className="!p-4 sm:!p-5"
-          action={
-            <div className="mt-1 flex flex-col items-stretch gap-2.5 sm:min-w-[160px]">
-              <button type="button" onClick={() => setCreateNodeDialogOpen(true)} className="btn-primary justify-center gap-1.5 px-3 py-2 text-sm">
-                <Plus className="h-3.5 w-3.5" />
-                Create
-              </button>
-              <button type="button" onClick={() => void syncNodes()} className="btn-secondary justify-center gap-1.5 px-3 py-2 text-sm">
-                <RefreshCw className="h-3.5 w-3.5" />
-                Sync
-              </button>
-              <button
-                type="button"
-                onClick={() => void runDiagnostics()}
-                disabled={isRunningDiagnostics}
-                className="btn-secondary justify-center gap-1.5 px-3 py-2 text-sm"
-              >
-                <Wrench className="h-3.5 w-3.5" />
-                {isRunningDiagnostics ? "Testing..." : "Test All"}
-              </button>
-            </div>
-          }
-        >
-          <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-            <div className="panel-subtle p-3">
-              <p className="metric-kicker">Registered</p>
-              <p className="mt-2 font-display text-2xl font-bold text-white">{nodes.length}</p>
-              <p className="mt-1 text-xs text-slate-500">All known VPS nodes</p>
-            </div>
-            <div className="panel-subtle p-3">
-              <p className="metric-kicker">Online</p>
-              <p className="mt-2 font-display text-2xl font-bold text-emerald-300">{onlineNodes}</p>
-              <p className="mt-1 text-xs text-slate-500">Responding to health checks</p>
-            </div>
-            <div className="panel-subtle p-3">
-              <p className="metric-kicker">Traffic Live</p>
-              <p className="mt-2 font-display text-2xl font-bold text-sky-300">{enabledNodes}</p>
-              <p className="mt-1 text-xs text-slate-500">Included in user access</p>
-            </div>
-            <div className="panel-subtle p-3">
-              <p className="metric-kicker">Verified Sync</p>
-              <p className="mt-2 font-display text-2xl font-bold text-emerald-300">{verifiedNodes}</p>
-              <p className="mt-1 text-xs text-slate-500">Nodes with confirmed applied config</p>
-            </div>
-          </div>
-        </SectionCard>
+  const inventoryActionClass =
+    "inline-flex items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-semibold text-slate-100 transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60";
 
-        <div className="panel-surface p-4 sm:p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="metric-kicker">Ops Signals</p>
-              <h3 className="mt-1.5 font-display text-xl font-semibold text-white">Fleet summary</h3>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-sky-400/10 p-2.5 text-sky-300">
-              <Globe className="h-4.5 w-4.5" />
+  const renderBandwidthRing = (usedBytes: number, limitGb: number) => {
+    const unlimited = limitGb === 0;
+    const limitBytes = limitGb * 1024 * 1024 * 1024;
+    const rawPercent = unlimited || limitBytes <= 0 ? 0 : (usedBytes / limitBytes) * 100;
+    const percent = Math.min(Math.max(rawPercent, 0), 100);
+    const tone = unlimited
+      ? "bg-slate-400"
+      : rawPercent >= 90
+        ? "bg-rose-400"
+        : rawPercent >= 70
+          ? "bg-amber-300"
+          : "bg-emerald-400";
+    const summary = unlimited ? "Unlimited" : `${limitGb} GB`;
+    const progressWidth = unlimited ? 18 : percent;
+
+    return (
+      <div className="panel-subtle rounded-[18px] px-3.5 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="metric-kicker">Bandwidth</p>
+            <p className="mt-1 text-sm font-semibold text-slate-50 sm:text-[15px]">
+              {formatBytes(usedBytes)}
+              <span className="mx-1.5 text-slate-500">/</span>
+              {summary}
+            </p>
+          </div>
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-slate-300">
+            {unlimited ? "No cap" : `${Math.round(percent)}%`}
+          </span>
+        </div>
+
+        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/8">
+          <div className={`h-full rounded-full transition-all duration-300 ${tone}`} style={{ width: `${progressWidth}%` }} />
+        </div>
+
+        <p className="mt-2 text-xs text-slate-500">{unlimited ? "This node has no bandwidth cap." : `${rawPercent.toFixed(1)}% used this cycle.`}</p>
+      </div>
+    );
+  };
+
+  const compactStats = [
+    { label: "Total", value: nodes.length, tone: "text-white" },
+    { label: "Online", value: onlineNodes, tone: "text-emerald-300" },
+    { label: "Enabled", value: enabledNodes, tone: "text-sky-300" },
+    { label: "Verified", value: verifiedNodes, tone: "text-emerald-300" },
+    { label: "Alerts", value: offlineNodes, tone: "text-amber-200" }
+  ];
+
+  return (
+    <div className="space-y-3">
+      <section className="panel-surface px-4 py-4 sm:px-5 sm:py-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0">
+            <p className="metric-kicker">Node Fleet</p>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-2">
+              <h2 className="font-display text-2xl font-semibold text-white">Nodes</h2>
+              <span className="text-sm text-slate-500">Provision, verify, and maintain the active fleet.</span>
             </div>
           </div>
-          <div className="mt-4 grid gap-2.5">
-            {[
-              { label: "Online nodes", value: onlineNodes, icon: ShieldCheck, tone: "text-emerald-300 bg-emerald-500/10" },
-              { label: "Needs attention", value: offlineNodes, icon: Wrench, tone: "text-amber-200 bg-amber-500/10" },
-              { label: "Recent action", value: nodeActionStatus || "No recent changes", icon: ServerCog, tone: "text-sky-300 bg-sky-500/10" }
-            ].map((item) => (
-              <div key={item.label} className="panel-subtle p-3">
-                <div className="flex items-start gap-3">
-                  <div className={`rounded-xl p-2 ${item.tone}`}>
-                    <item.icon className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-300">{item.label}</p>
-                    <p className="mt-0.5 break-words text-sm text-white">{item.value}</p>
-                  </div>
-                </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => setCreateNodeDialogOpen(true)} className="btn-primary gap-1.5 px-3 py-2 text-sm">
+              <Plus className="h-3.5 w-3.5" />
+              Create
+            </button>
+            <button type="button" onClick={() => void syncNodes()} className="btn-secondary gap-1.5 px-3 py-2 text-sm">
+              <RefreshCw className="h-3.5 w-3.5" />
+              Sync
+            </button>
+            <button
+              type="button"
+              onClick={() => void runDiagnostics()}
+              disabled={isRunningDiagnostics}
+              className="btn-secondary gap-1.5 px-3 py-2 text-sm"
+            >
+              <Wrench className="h-3.5 w-3.5" />
+              {isRunningDiagnostics ? "Testing..." : "Test"}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr),340px]">
+          <div className="grid gap-2 grid-cols-2 md:grid-cols-5">
+            {compactStats.map((item) => (
+              <div key={item.label} className="panel-subtle rounded-[20px] px-3 py-2.5">
+                <p className="metric-kicker">{item.label}</p>
+                <p className={`mt-1 text-lg font-semibold ${item.tone}`}>{item.value}</p>
               </div>
             ))}
+          </div>
+
+          <div className="panel-subtle rounded-[20px] px-3 py-2.5">
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl border border-white/10 bg-sky-400/10 p-2 text-sky-300">
+                <Globe className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="metric-kicker">Recent Action</p>
+                <p className="mt-1 break-words text-sm text-slate-200">{nodeActionStatus || "No recent changes"}</p>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -455,10 +501,10 @@ export function NodesPage() {
           eyebrow="Provision Activity"
           title={isBootstrapping ? "Node provisioning in progress" : "Latest provisioning run"}
           description="Bootstrap progress stays visible here after the modal is submitted."
+          className="!p-4 sm:!p-5"
         >
-          <div className="panel-subtle p-4">
-            <p className="metric-kicker">Bootstrap Log</p>
-            <div className="mt-4 space-y-2 text-sm text-slate-300">
+          <div className="panel-subtle rounded-[20px] p-3">
+            <div className="space-y-1.5 text-sm text-slate-300">
               {bootstrapLog.map((step, index) => (
                 <p key={`${step}-${index}`}>{step}</p>
               ))}
@@ -472,26 +518,27 @@ export function NodesPage() {
           eyebrow="Node Diagnostics"
           title="Manual speed-quality snapshot"
           description="These are manual panel-to-node checks focused on what matters for the MVP: API latency plus a small upload and download speed sample."
+          className="!p-4 sm:!p-5"
         >
-          <div className="space-y-4">
-            <div className="grid gap-2.5 sm:grid-cols-3">
-              <div className="panel-subtle p-3">
+          <div className="space-y-3">
+            <div className="grid gap-2 sm:grid-cols-3">
+              <div className="panel-subtle rounded-[20px] p-3">
                 <p className="metric-kicker">Healthy</p>
-                <p className="mt-2 font-display text-2xl font-bold text-emerald-300">{healthyDiagnostics}</p>
+                <p className="mt-1 text-lg font-semibold text-emerald-300">{healthyDiagnostics}</p>
               </div>
-              <div className="panel-subtle p-3">
+              <div className="panel-subtle rounded-[20px] p-3">
                 <p className="metric-kicker">Degraded</p>
-                <p className="mt-2 font-display text-2xl font-bold text-amber-200">{degradedDiagnostics}</p>
+                <p className="mt-1 text-lg font-semibold text-amber-200">{degradedDiagnostics}</p>
               </div>
-              <div className="panel-subtle p-3">
+              <div className="panel-subtle rounded-[20px] p-3">
                 <p className="metric-kicker">Offline</p>
-                <p className="mt-2 font-display text-2xl font-bold text-rose-300">{offlineDiagnostics}</p>
+                <p className="mt-1 text-lg font-semibold text-rose-300">{offlineDiagnostics}</p>
               </div>
             </div>
 
             <div className="grid gap-3 xl:grid-cols-2">
               {diagnostics.map((entry) => (
-                <div key={entry.nodeId} className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
+                <div key={entry.nodeId} className="rounded-[20px] border border-white/10 bg-white/[0.03] p-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -518,17 +565,17 @@ export function NodesPage() {
                     <p className="text-xs text-slate-500">{new Date(entry.testedAt).toLocaleString()}</p>
                   </div>
 
-                  <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
-                    <div className="rounded-[18px] border border-white/10 bg-slate-950/28 px-3 py-3">
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <div className="rounded-[16px] border border-white/10 bg-slate-950/28 px-3 py-2.5">
                       <p className="metric-kicker">API Latency</p>
-                      <p className="mt-2 text-sm font-semibold text-white">
+                      <p className="mt-1 text-sm font-semibold text-white">
                         {entry.apiReachable ? formatLatency(entry.apiLatencyMs) : "Offline"}
                       </p>
                       <p className="mt-1 text-xs text-slate-500">{entry.apiErrorMessage || "Node API /status probe"}</p>
                     </div>
-                    <div className="rounded-[18px] border border-white/10 bg-slate-950/28 px-3 py-3">
+                    <div className="rounded-[16px] border border-white/10 bg-slate-950/28 px-3 py-2.5">
                       <p className="metric-kicker">Download</p>
-                      <p className="mt-2 text-sm font-semibold text-white">
+                      <p className="mt-1 text-sm font-semibold text-white">
                         {entry.downloadError ? "Failed" : formatSpeed(entry.downloadMbps)}
                       </p>
                       <p className="mt-1 text-xs text-slate-500">
@@ -537,19 +584,19 @@ export function NodesPage() {
                     </div>
                   </div>
 
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    <div className="rounded-[18px] border border-white/10 bg-slate-950/28 px-3 py-3">
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    <div className="rounded-[16px] border border-white/10 bg-slate-950/28 px-3 py-2.5">
                       <p className="metric-kicker">Upload</p>
-                      <p className="mt-2 text-sm font-semibold text-white">
+                      <p className="mt-1 text-sm font-semibold text-white">
                         {entry.uploadError ? "Failed" : formatSpeed(entry.uploadMbps)}
                       </p>
                       <p className="mt-1 text-xs text-slate-500">
                         {entry.uploadError || `${formatBytes(entry.uploadBytes)} sample pushed to node agent`}
                       </p>
                     </div>
-                    <div className="rounded-[18px] border border-white/10 bg-slate-950/28 px-3 py-3">
+                    <div className="rounded-[16px] border border-white/10 bg-slate-950/28 px-3 py-2.5">
                       <p className="metric-kicker">Snapshot</p>
-                      <p className="mt-2 text-sm font-semibold text-white">
+                      <p className="mt-1 text-sm font-semibold text-white">
                         {entry.qualityStatus === "healthy" ? "Looks solid" : entry.qualityStatus === "degraded" ? "Needs review" : "Offline"}
                       </p>
                       <p className="mt-1 text-xs text-slate-500">
@@ -564,22 +611,22 @@ export function NodesPage() {
         </SectionCard>
       ) : null}
 
-      <SectionCard eyebrow="Node Inventory" title="Registered nodes" description="Compact rows designed for larger fleets, with the controls and node facts kept close together.">
-        <div className="space-y-4">
+      <SectionCard eyebrow="Node Inventory" title="Registered nodes" description="A denser inventory view with the key facts and actions kept on one screen." className="!p-4 sm:!p-5">
+        <div className="space-y-3">
           {nodeActionStatus ? (
-            <div className="rounded-2xl border border-sky-400/15 bg-sky-400/10 px-4 py-3 text-sm text-sky-100">
+            <div className="rounded-[18px] border border-sky-400/15 bg-sky-400/10 px-3 py-2.5 text-sm text-sky-100">
               {nodeActionStatus}
             </div>
           ) : null}
 
           {nodes.length === 0 ? (
-            <div className="rounded-[24px] border border-dashed border-white/12 bg-white/[0.02] px-5 py-6">
+            <div className="rounded-[20px] border border-dashed border-white/12 bg-white/[0.02] px-4 py-5">
               <p className="metric-kicker">Fleet Offline</p>
-              <h3 className="mt-3 font-display text-2xl font-semibold text-white">No nodes registered yet</h3>
-              <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-400">
+              <h3 className="mt-2 font-display text-xl font-semibold text-white">No nodes registered yet</h3>
+              <p className="mt-2 max-w-2xl text-sm text-slate-400">
                 Add a VPS node to start syncing users and generating routes.
               </p>
-              <button type="button" onClick={() => setCreateNodeDialogOpen(true)} className="btn-primary mt-5 gap-1.5">
+              <button type="button" onClick={() => setCreateNodeDialogOpen(true)} className="btn-primary mt-4 gap-1.5">
                 <Plus className="h-4 w-4" />
                 Create first node
               </button>
@@ -587,127 +634,178 @@ export function NodesPage() {
           ) : (
             <div className="space-y-3">
               {nodes.map((node) => {
+                const miner = miners.find((item) => item.id === node.minerId);
+                const healthTone =
+                  node.healthStatus === "online"
+                    ? "border-emerald-400/15 bg-emerald-400/10 text-emerald-200"
+                    : node.healthStatus === "offline"
+                      ? "border-rose-400/15 bg-rose-400/10 text-rose-200"
+                      : "border-white/10 bg-white/[0.04] text-slate-300";
+                const healthDotTone =
+                  node.healthStatus === "online" ? "bg-emerald-400" : node.healthStatus === "offline" ? "bg-rose-400" : "bg-slate-500";
+                const verificationTone =
+                  node.syncVerificationStatus === "verified"
+                    ? "border-emerald-400/15 bg-emerald-400/10 text-emerald-200"
+                    : node.syncVerificationStatus === "mismatch"
+                      ? "border-amber-300/15 bg-amber-300/10 text-amber-100"
+                      : node.syncVerificationStatus === "error"
+                        ? "border-rose-400/15 bg-rose-400/10 text-rose-200"
+                        : "border-white/10 bg-white/[0.04] text-slate-300";
+                const verificationDotTone =
+                  node.syncVerificationStatus === "verified"
+                    ? "bg-emerald-400"
+                    : node.syncVerificationStatus === "mismatch"
+                      ? "bg-amber-300"
+                      : node.syncVerificationStatus === "error"
+                        ? "bg-rose-400"
+                        : "bg-slate-500";
+
                 return (
                   <article
                     key={node.id}
-                    className={`rounded-[24px] border px-4 py-4 sm:px-5 ${
-                      node.enabled ? "border-white/10 bg-white/[0.04] shadow-panel" : "border-amber-400/16 bg-amber-300/[0.05] shadow-panel"
+                    className={`overflow-hidden rounded-[24px] border shadow-panel ${
+                      node.enabled ? "border-white/10 bg-white/[0.04]" : "border-amber-300/15 bg-amber-300/[0.05]"
                     }`}
                   >
-                    <div className="flex flex-col gap-3">
-                      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="font-display text-xl font-semibold text-white">{node.name}</h3>
-                            <span className={`status-pill ${
-                              node.healthStatus === "online" ? "text-emerald-300" : node.healthStatus === "offline" ? "text-rose-300" : "text-slate-400"
-                            }`}>
-                              <span className={`h-2 w-2 rounded-full ${
-                                node.healthStatus === "online" ? "bg-emerald-400" : node.healthStatus === "offline" ? "bg-rose-400" : "bg-slate-500"
-                              }`} />
-                              {node.healthStatus}
-                            </span>
-                            <span className={`status-pill ${node.enabled ? "text-sky-300" : "text-amber-200"}`}>
-                              <span className={`h-2 w-2 rounded-full ${node.enabled ? "bg-sky-400" : "bg-amber-300"}`} />
-                              {node.enabled ? "enabled" : "disabled"}
-                            </span>
-                            {node.isTestable ? (
-                              <span className="status-pill text-amber-200">
-                                <span className="h-2 w-2 rounded-full bg-amber-300" />
-                                testable
+                    <div className="px-3.5 py-3.5 sm:px-4 sm:py-4">
+                      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),320px] xl:items-start">
+                        <div className="min-w-0 space-y-4">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="font-display text-base font-semibold text-white sm:text-lg">{node.name}</h3>
+                              <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                                {node.location || "Unknown region"}
                               </span>
-                            ) : null}
-                            <span className={`status-pill ${
-                              node.syncVerificationStatus === "verified"
-                                ? "text-emerald-300"
-                                : node.syncVerificationStatus === "mismatch"
-                                  ? "text-amber-200"
-                                  : node.syncVerificationStatus === "error"
-                                    ? "text-rose-300"
-                                    : "text-slate-400"
-                            }`}>
-                              <span className={`h-2 w-2 rounded-full ${
-                                node.syncVerificationStatus === "verified"
-                                  ? "bg-emerald-400"
-                                  : node.syncVerificationStatus === "mismatch"
-                                    ? "bg-amber-300"
-                                    : node.syncVerificationStatus === "error"
-                                      ? "bg-rose-400"
-                                      : "bg-slate-500"
-                              }`} />
-                              {node.syncVerificationStatus || "unknown"}
-                            </span>
+                            </div>
+
+                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                              <p className="text-sm font-medium text-slate-100 sm:text-[15px]">{node.publicHost || "No public host"}</p>
+                              {node.baseUrl ? (
+                                <a
+                                  href={node.baseUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1 text-xs font-medium text-sky-300 transition hover:text-sky-200"
+                                >
+                                  Open endpoint
+                                  <ExternalLink className="h-3.5 w-3.5" />
+                                </a>
+                              ) : null}
+                            </div>
+                            <p className="mt-1 text-xs text-slate-500">{node.baseUrl}</p>
+
+                            <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
+                              <span>{node.enabled ? "Serving traffic" : "Traffic paused"}</span>
+                              <span>{miner?.name || "Unassigned"} miner</span>
+                              <span>{node.appliedUserCount ?? 0} applied users</span>
+                            </div>
+
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <span className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${healthTone}`}>
+                                <span className={`h-1.5 w-1.5 rounded-full ${healthDotTone}`} />
+                                {formatStatusLabel(node.healthStatus)}
+                              </span>
+                              <span
+                                className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${
+                                  node.enabled
+                                    ? "border-sky-400/15 bg-sky-400/10 text-sky-200"
+                                    : "border-amber-300/15 bg-amber-300/10 text-amber-100"
+                                }`}
+                              >
+                                <span className={`h-1.5 w-1.5 rounded-full ${node.enabled ? "bg-sky-400" : "bg-amber-300"}`} />
+                                {node.enabled ? "Enabled" : "Disabled"}
+                              </span>
+                              {node.isTestable ? (
+                                <span className="inline-flex items-center gap-2 rounded-full border border-amber-300/15 bg-amber-300/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-100">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-amber-300" />
+                                  Testable
+                                </span>
+                              ) : null}
+                              <span className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${verificationTone}`}>
+                                <span className={`h-1.5 w-1.5 rounded-full ${verificationDotTone}`} />
+                                {formatStatusLabel(node.syncVerificationStatus)}
+                              </span>
+                            </div>
                           </div>
-                          <p className="mt-1 text-sm text-slate-400">
-                            {node.location || "Unknown region"} • {node.publicHost || "No public host"}
-                          </p>
+
+                          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                            <div className="panel-subtle rounded-[16px] px-3 py-2.5">
+                              <p className="metric-kicker">Miner</p>
+                              <p className="mt-1 text-sm font-medium text-slate-200">{miner?.name || "Unassigned"}</p>
+                            </div>
+                            <div className="panel-subtle rounded-[16px] px-3 py-2.5">
+                              <p className="metric-kicker">Traffic</p>
+                              <p className="mt-1 text-sm font-medium text-slate-200">
+                                {node.enabled ? "Serving traffic" : "Disabled"}
+                                {node.isTestable ? " • Testable" : ""}
+                              </p>
+                            </div>
+                            <div className="panel-subtle rounded-[16px] px-3 py-2.5">
+                              <p className="metric-kicker">Last Sync</p>
+                              <p className="mt-1 text-sm font-medium text-slate-200">{formatCompactDateTime(node.lastSyncAt)}</p>
+                              <p className="mt-0.5 text-xs text-slate-500">Verified {formatCompactDateTime(node.syncVerifiedAt)}</p>
+                            </div>
+                            <div className="panel-subtle rounded-[16px] px-3 py-2.5">
+                              <p className="metric-kicker">Expiry</p>
+                              <p className="mt-1 text-sm font-medium text-slate-200">{formatDateTime(node.expiresAt)}</p>
+                              <p className="mt-0.5 text-xs text-slate-500">{node.appliedUserCount ?? 0} applied users</p>
+                            </div>
+                          </div>
+
                           {node.syncVerificationError ? (
-                            <p className="mt-1 text-xs text-amber-200">{node.syncVerificationError}</p>
+                            <p className="rounded-[16px] border border-amber-300/15 bg-amber-300/[0.06] px-3 py-2 text-xs text-amber-200">
+                              {node.syncVerificationError}
+                            </p>
                           ) : null}
                         </div>
 
-                        <div className="flex flex-wrap gap-2">
-                          <button onClick={() => openEditNode(node)} className="btn-secondary px-3 py-2 text-xs">
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => setToggleTarget(node)}
-                            disabled={isTogglingNode}
-                            className={`${node.enabled ? "btn-secondary" : "btn-primary"} gap-1 px-3 py-2 text-xs`}
-                          >
-                            {node.enabled ? <PauseCircle className="h-3.5 w-3.5" /> : <PlayCircle className="h-3.5 w-3.5" />}
-                            {node.enabled ? "Disable" : "Enable"}
-                          </button>
-                          <button onClick={() => setReinstallTarget(node)} disabled={isReinstalling} className="btn-secondary gap-1 px-3 py-2 text-xs">
-                            <RefreshCw className="h-3.5 w-3.5" />
-                            Reinstall
-                          </button>
-                          <button
-                            onClick={() => setDeleteTarget(node)}
-                            className="btn-secondary gap-1 px-3 py-2 text-xs"
-                            title="Delete node from panel only"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            Delete
-                          </button>
-                          <button
-                            onClick={() => setUninstallTarget(node)}
-                            className="inline-flex items-center justify-center gap-1 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-100 transition hover:bg-rose-500/20"
-                            title="Uninstall node"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            Uninstall
-                          </button>
+                        <div className="flex flex-col gap-2">
+                          {renderBandwidthRing(node.bandwidthUsedBytes, node.bandwidthLimitGb)}
+
+                          <div className="panel-subtle rounded-[18px] p-2.5">
+                            <p className="metric-kicker px-1">Actions</p>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <button onClick={() => openEditNode(node)} className={inventoryActionClass}>
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => setToggleTarget(node)}
+                                disabled={isTogglingNode}
+                                className={
+                                  node.enabled
+                                    ? inventoryActionClass
+                                    : "inline-flex items-center justify-center gap-1.5 rounded-xl bg-white px-3 py-2 text-xs font-semibold text-slate-950 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                }
+                              >
+                                {node.enabled ? <PauseCircle className="h-3.5 w-3.5" /> : <PlayCircle className="h-3.5 w-3.5" />}
+                                {node.enabled ? "Disable" : "Enable"}
+                              </button>
+                              <button onClick={() => setReinstallTarget(node)} disabled={isReinstalling} className={inventoryActionClass}>
+                                <RefreshCw className="h-3.5 w-3.5" />
+                                Reinstall
+                              </button>
+                              <button
+                                onClick={() => setDeleteTarget(node)}
+                                className={inventoryActionClass}
+                                title="Delete node from panel only"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Delete
+                              </button>
+                            </div>
+                            <div className="mt-2 border-t border-white/8 pt-2">
+                              <button
+                                onClick={() => setUninstallTarget(node)}
+                                className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-100 transition hover:bg-rose-500/20"
+                                title="Uninstall node"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Uninstall from server
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       </div>
-
-                      <dl className="grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-6">
-                        <div className="rounded-[20px] border border-white/10 bg-slate-950/28 px-3 py-3">
-                          <dt className="metric-kicker">API</dt>
-                          <dd className="mt-2 break-all text-slate-200">{node.baseUrl}</dd>
-                        </div>
-                        <div className="rounded-[20px] border border-white/10 bg-slate-950/28 px-3 py-3">
-                          <dt className="metric-kicker">Usage</dt>
-                          <dd className="mt-2 text-slate-200">{formatBytes(node.bandwidthUsedBytes)}</dd>
-                        </div>
-                        <div className="rounded-[20px] border border-white/10 bg-slate-950/28 px-3 py-3">
-                          <dt className="metric-kicker">Limit</dt>
-                          <dd className="mt-2 text-slate-200">{node.bandwidthLimitGb > 0 ? `${node.bandwidthLimitGb} GB` : "Unlimited"}</dd>
-                        </div>
-                        <div className="rounded-[20px] border border-white/10 bg-slate-950/28 px-3 py-3">
-                          <dt className="metric-kicker">Last Sync</dt>
-                          <dd className="mt-2 text-slate-200">{formatCompactDateTime(node.lastSyncAt)}</dd>
-                        </div>
-                        <div className="rounded-[20px] border border-white/10 bg-slate-950/28 px-3 py-3">
-                          <dt className="metric-kicker">Verified</dt>
-                          <dd className="mt-2 text-slate-200">{formatCompactDateTime(node.syncVerifiedAt)}</dd>
-                          <p className="mt-1 text-xs text-slate-500">{node.appliedUserCount ?? 0} applied users</p>
-                        </div>
-                        <div className="rounded-[20px] border border-white/10 bg-slate-950/28 px-3 py-3">
-                          <dt className="metric-kicker">Expires</dt>
-                          <dd className="mt-2 text-slate-200">{formatDateTime(node.expiresAt)}</dd>
-                        </div>
-                      </dl>
                     </div>
                   </article>
                 );
@@ -728,6 +826,22 @@ export function NodesPage() {
       >
         <form className="space-y-5" onSubmit={(event) => void bootstrapNode(event)}>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-slate-300">Miner</span>
+              <select
+                value={form.minerId}
+                onChange={(event) => setForm((current) => ({ ...current, minerId: event.target.value }))}
+                className="input-shell"
+                required
+              >
+                <option value="">Select miner</option>
+                {miners.map((miner) => (
+                  <option key={miner.id} value={miner.id}>
+                    {miner.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             {bootstrapFields.map((field) => (
               <label key={field.key} className="block">
                 <span className="mb-2 block text-sm font-semibold text-slate-300">{field.label}</span>
@@ -772,6 +886,22 @@ export function NodesPage() {
         onConfirm={() => undefined}
       >
         <form className="space-y-4" onSubmit={(event) => void saveNodeDetails(event)}>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-300">Miner</span>
+            <select
+              value={nodeEditForm.minerId}
+              onChange={(event) => setNodeEditForm((current) => ({ ...current, minerId: event.target.value }))}
+              className="input-shell"
+              required
+            >
+              <option value="">Select miner</option>
+              {miners.map((miner) => (
+                <option key={miner.id} value={miner.id}>
+                  {miner.name}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-slate-300">Location</span>
             <input

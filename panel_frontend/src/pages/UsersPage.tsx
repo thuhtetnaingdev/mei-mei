@@ -151,12 +151,12 @@ const deriveUserSummary = (user: User): DerivedUserSummary => {
   }
 
   const now = Date.now();
-  let totalRemainingBytes = 0;
+  let totalAllocatedBytes = 0;
   let totalRemainingTokens = 0;
   let latestExpiryAt: string | null = null;
 
   allocations.forEach((allocation) => {
-    if ((allocation.remainingBandwidthBytes ?? 0) <= 0) {
+    if ((allocation.totalBandwidthBytes ?? 0) <= 0) {
       return;
     }
 
@@ -171,11 +171,11 @@ const deriveUserSummary = (user: User): DerivedUserSummary => {
       }
     }
 
-    totalRemainingBytes += allocation.remainingBandwidthBytes ?? 0;
-    totalRemainingTokens += allocation.remainingTokens ?? 0;
+    totalAllocatedBytes += allocation.totalBandwidthBytes ?? 0;
+    totalRemainingTokens += Math.max(allocation.remainingTokens ?? 0, 0);
   });
 
-  if (totalRemainingBytes <= 0 && totalRemainingTokens <= 0 && !latestExpiryAt) {
+  if (totalAllocatedBytes <= 0 && totalRemainingTokens <= 0 && !latestExpiryAt) {
     return {
       expiresAt: user.expiresAt ?? null,
       bandwidthLimitGb: user.bandwidthLimitGb ?? 0,
@@ -185,7 +185,7 @@ const deriveUserSummary = (user: User): DerivedUserSummary => {
 
   return {
     expiresAt: latestExpiryAt ?? user.expiresAt ?? null,
-    bandwidthLimitGb: totalRemainingBytes > 0 ? Math.ceil(totalRemainingBytes / bytesPerGB) : user.bandwidthLimitGb ?? 0,
+    bandwidthLimitGb: totalAllocatedBytes > 0 ? Math.ceil(totalAllocatedBytes / bytesPerGB) : user.bandwidthLimitGb ?? 0,
     tokenBalance: totalRemainingTokens > 0 ? totalRemainingTokens : user.tokenBalance ?? 0
   };
 };

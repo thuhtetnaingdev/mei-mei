@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestGenerateBuildsSingleUserShadowsocksInbounds(t *testing.T) {
+func TestGenerateBuildsMultiUserShadowsocksInbound(t *testing.T) {
 	payload, err := Generate(
 		"webdock",
 		"92.113.148.36",
@@ -44,35 +44,40 @@ func TestGenerateBuildsSingleUserShadowsocksInbounds(t *testing.T) {
 		}
 	}
 
-	if len(shadowsocksInbounds) != 2 {
-		t.Fatalf("expected 2 shadowsocks inbounds, got %d", len(shadowsocksInbounds))
+	if len(shadowsocksInbounds) != 1 {
+		t.Fatalf("expected 1 shadowsocks inbound, got %d", len(shadowsocksInbounds))
 	}
 
-	expectedPorts := map[float64]string{
-		10000: ShadowsocksUserPassword("webdock", "92.113.148.36", "user-1"),
-		10001: ShadowsocksUserPassword("webdock", "92.113.148.36", "user-2"),
+	inbound := shadowsocksInbounds[0]
+	expectedPort := float64(ShadowsocksPort("webdock", "92.113.148.36"))
+	if inbound["listen_port"] != expectedPort {
+		t.Fatalf("unexpected shadowsocks port: got %v want %v", inbound["listen_port"], expectedPort)
+	}
+	if inbound["password"] != ShadowsocksServerPassword("webdock", "92.113.148.36") {
+		t.Fatalf("unexpected shadowsocks server password: %#v", inbound["password"])
 	}
 
-	for _, inbound := range shadowsocksInbounds {
-		port, ok := inbound["listen_port"].(float64)
-		if !ok {
-			t.Fatalf("listen_port missing or invalid: %#v", inbound["listen_port"])
-		}
+	users, ok := inbound["users"].([]interface{})
+	if !ok {
+		t.Fatalf("shadowsocks inbound users missing or invalid: %#v", inbound["users"])
+	}
+	if len(users) != 2 {
+		t.Fatalf("expected 2 enabled shadowsocks users, got %d", len(users))
+	}
 
-		password, ok := inbound["password"].(string)
+	expectedUsers := map[string]string{
+		"one@example.com": ShadowsocksUserPassword("webdock", "92.113.148.36", "user-1"),
+		"two@example.com": ShadowsocksUserPassword("webdock", "92.113.148.36", "user-2"),
+	}
+	for _, rawUser := range users {
+		entry, ok := rawUser.(map[string]interface{})
 		if !ok {
-			t.Fatalf("password missing or invalid: %#v", inbound["password"])
+			t.Fatalf("unexpected shadowsocks user payload: %#v", rawUser)
 		}
-
-		expectedPassword, exists := expectedPorts[port]
-		if !exists {
-			t.Fatalf("unexpected shadowsocks port %v", port)
-		}
-		if password != expectedPassword {
-			t.Fatalf("unexpected password for port %v: got %q want %q", port, password, expectedPassword)
-		}
-		if _, hasUsers := inbound["users"]; hasUsers {
-			t.Fatalf("shadowsocks inbound should not include users: %#v", inbound)
+		name, _ := entry["name"].(string)
+		password, _ := entry["password"].(string)
+		if expectedUsers[name] != password {
+			t.Fatalf("unexpected shadowsocks user entry: %#v", entry)
 		}
 	}
 }
