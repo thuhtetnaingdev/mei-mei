@@ -86,15 +86,40 @@ func (s *UserClassificationService) ClassifyUser(user *models.User) (*UserClassi
 	previousType := user.UserType
 	now := time.Now()
 
-	// Calculate weekly usage
+	// Skip classification if too soon after last classification (enforce 7-day minimum)
+	if user.LastClassifiedAt != nil {
+		timeSinceLastClassify := now.Sub(*user.LastClassifiedAt)
+		if timeSinceLastClassify < ClassificationTimeThreshold {
+			remainingTime := ClassificationTimeThreshold - timeSinceLastClassify
+			log.Printf("[user-classification] skipping user %s: only %.1f days since last classification (%.1f days remaining)",
+				user.UUID, timeSinceLastClassify.Hours()/24, remainingTime.Hours()/24)
+			return nil, nil // Skip, not an error
+		}
+	}
+
+	// Calculate weekly usage (normalized to 7-day period)
 	var weeklyUsageBytes int64
-	if user.LastWeekMeteredBytes > 0 {
-		weeklyUsageBytes = user.BandwidthUsedBytes - user.LastWeekMeteredBytes
+	if user.LastWeekMeteredBytes > 0 && user.LastClassifiedAt != nil {
+		// Calculate bytes used since last classification
+		bytesSinceLastClassify := user.BandwidthUsedBytes - user.LastWeekMeteredBytes
 		// Handle negative usage (data reset/corruption)
-		if weeklyUsageBytes < 0 {
-			log.Printf("[user-classification] negative weekly usage detected for user %s (%d bytes), resetting to current usage",
-				user.UUID, weeklyUsageBytes)
-			weeklyUsageBytes = user.BandwidthUsedBytes
+		if bytesSinceLastClassify < 0 {
+			log.Printf("[user-classification] negative usage detected for user %s (%d bytes), resetting to current usage",
+				user.UUID, bytesSinceLastClassify)
+			bytesSinceLastClassify = user.BandwidthUsedBytes
+		}
+		
+		// Calculate time elapsed since last classification
+		timeSinceLastClassify := now.Sub(*user.LastClassifiedAt)
+		hoursSinceLastClassify := timeSinceLastClassify.Hours()
+		
+		// Normalize to weekly rate (168 hours = 7 days)
+		if hoursSinceLastClassify > 0 {
+			weeklyUsageBytes = int64(float64(bytesSinceLastClassify) * (168.0 / hoursSinceLastClassify))
+			log.Printf("[user-classification] user %s: %d bytes in %.1f hours, normalized to %d bytes/week",
+				user.UUID, bytesSinceLastClassify, hoursSinceLastClassify, weeklyUsageBytes)
+		} else {
+			weeklyUsageBytes = bytesSinceLastClassify
 		}
 	} else {
 		// First classification - use current as baseline
@@ -151,6 +176,10 @@ func (s *UserClassificationService) ClassifyAllUsers() ([]UserClassification, er
 		classification, err := s.ClassifyUser(&users[i])
 		if err != nil {
 			log.Printf("[user-classification] failed to classify user %s: %v", users[i].UUID, err)
+			continue
+		}
+		if classification == nil {
+			// Skipped due to 7-day minimum interval
 			continue
 		}
 		classifications = append(classifications, *classification)

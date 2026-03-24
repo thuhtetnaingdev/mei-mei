@@ -1,4 +1,4 @@
-import { Activity, Calendar, Copy, Link2, Minus, Pencil, Plus, QrCode, RefreshCw, Trash2 } from "lucide-react";
+import { Activity, Calendar, Copy, Link2, Minus, Pencil, Plus, QrCode, Trash2 } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import axios from "axios";
 import QRCode from "qrcode";
@@ -368,9 +368,6 @@ export function UsersPage() {
   const [mainWalletBalance, setMainWalletBalance] = useState<number | null>(null);
   const [classificationStatus, setClassificationStatus] = useState<UserClassificationStatus | undefined>(undefined);
   const [classificationStats, setClassificationStats] = useState<UserClassificationStats | undefined>(undefined);
-  const [isClassifying, setIsClassifying] = useState(false);
-  const [classifyError, setClassifyError] = useState("");
-  const [classifySuccess, setClassifySuccess] = useState(false);
 
   const loadUsers = () => api.get<User[]>("/users").then((res) => setUsers(res.data));
   const loadNodes = () => api.get<Node[]>("/nodes").then((res) => setNodes(res.data));
@@ -398,32 +395,11 @@ export function UsersPage() {
       .then((res) => setClassificationStats(res.data))
       .catch(() => undefined);
 
-  const triggerClassification = async () => {
-    setIsClassifying(true);
-    setClassifyError("");
-    setClassifySuccess(false);
-
-    try {
-      await api.post("/users/classify");
-      setClassifySuccess(true);
-      await loadUsers();
-      await loadClassificationStatus();
-      await loadClassificationStats();
-      setTimeout(() => setClassifySuccess(false), 5000);
-    } catch (error) {
-      setClassifyError(extractApiError(error, "Failed to run classification. Please try again."));
-    } finally {
-      setIsClassifying(false);
-    }
-  };
-
   useEffect(() => {
     void Promise.all([
       loadUsers(),
       loadTreasury(),
-      loadNodes().catch(() => undefined),
-      loadClassificationStatus().catch(() => undefined),
-      loadClassificationStats().catch(() => undefined)
+      loadNodes().catch(() => undefined)
     ]).catch(() => undefined);
   }, []);
 
@@ -820,7 +796,7 @@ export function UsersPage() {
             </div>
           </div>
 
-          {/* Classification Status - Ultra Minimalist */}
+          {/* Classification Status - Read-only */}
           <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-white/10 pt-4">
             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${classificationStatus?.schedulerActive ? "bg-emerald-500/10 text-emerald-400" : "bg-slate-500/10 text-slate-400"}`}>
               <Activity className="h-3.5 w-3.5" />
@@ -840,38 +816,10 @@ export function UsersPage() {
               Moderate {classificationStats?.moderateUsers ?? 0}
             </span>
             <div className="ml-auto flex items-center gap-2">
-              <span className="text-xs text-slate-500">Last:</span>
+              <span className="text-xs text-slate-500">Last run:</span>
               <span className="text-xs text-slate-400">{classificationStatus?.lastRunAt ? new Date(classificationStatus.lastRunAt).toLocaleString() : "Not run yet"}</span>
-              <button
-                type="button"
-                onClick={triggerClassification}
-                disabled={isClassifying}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                  isClassifying
-                    ? "bg-slate-700 text-slate-400 cursor-not-allowed"
-                    : "bg-sky-600 text-white hover:bg-sky-500"
-                }`}
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${isClassifying ? "animate-spin" : ""}`} />
-                Run Now
-              </button>
             </div>
           </div>
-
-          {(classifyError || classifySuccess) && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {classifyError && (
-                <div className="rounded-lg bg-rose-500/10 border border-rose-500/20 px-3 py-2 text-xs text-rose-400">
-                  {classifyError}
-                </div>
-              )}
-              {classifySuccess && (
-                <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 text-xs text-emerald-400">
-                  Classification completed
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </section>
 
