@@ -1,4 +1,4 @@
-import { Calendar, Copy, Link2, Minus, Pencil, Plus, QrCode, ShieldCheck, Trash2, UserRoundX, Users } from "lucide-react";
+import { Activity, Calendar, Copy, Link2, Minus, Pencil, Plus, QrCode, RefreshCw, Trash2 } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import axios from "axios";
 import QRCode from "qrcode";
@@ -6,7 +6,7 @@ import api from "../api/client";
 import { BandwidthUsage } from "../components/BandwidthUsage";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { SectionCard } from "../components/SectionCard";
-import type { MintPoolSnapshot, Node, User, UserBandwidthAllocation } from "../types";
+import type { MintPoolSnapshot, Node, User, UserBandwidthAllocation, UserClassificationStatus, UserClassificationStats } from "../types";
 
 interface SubscriptionResponse {
   userId: number;
@@ -302,7 +302,7 @@ function AllocationSummary({ allocation }: { allocation: UserBandwidthAllocation
         {formatBandwidthBytes(allocation.remainingBandwidthBytes)} left of {formatBandwidthBytes(allocation.totalBandwidthBytes)}
       </p>
       <p className="mt-1 break-words text-xs text-slate-500">
-        {allocation.remainingTokens.toFixed(2)} / {allocation.tokenAmount.toFixed(2)} tokens · {formatDate(allocation.expiresAt)}
+        {allocation.remainingTokens.toFixed(2)} / {allocation.tokenAmount.toFixed(2)} credits · {formatDate(allocation.expiresAt)}
       </p>
     </div>
   );
@@ -366,6 +366,11 @@ export function UsersPage() {
   const [formStatus, setFormStatus] = useState("");
   const [formError, setFormError] = useState("");
   const [mainWalletBalance, setMainWalletBalance] = useState<number | null>(null);
+  const [classificationStatus, setClassificationStatus] = useState<UserClassificationStatus | undefined>(undefined);
+  const [classificationStats, setClassificationStats] = useState<UserClassificationStats | undefined>(undefined);
+  const [isClassifying, setIsClassifying] = useState(false);
+  const [classifyError, setClassifyError] = useState("");
+  const [classifySuccess, setClassifySuccess] = useState(false);
 
   const loadUsers = () => api.get<User[]>("/users").then((res) => setUsers(res.data));
   const loadNodes = () => api.get<Node[]>("/nodes").then((res) => setNodes(res.data));
@@ -383,8 +388,43 @@ export function UsersPage() {
     }
   };
 
+  const loadClassificationStatus = () =>
+    api.get<UserClassificationStatus>("/users/classification/status")
+      .then((res) => setClassificationStatus(res.data))
+      .catch(() => undefined);
+
+  const loadClassificationStats = () =>
+    api.get<UserClassificationStats>("/users/classification/stats")
+      .then((res) => setClassificationStats(res.data))
+      .catch(() => undefined);
+
+  const triggerClassification = async () => {
+    setIsClassifying(true);
+    setClassifyError("");
+    setClassifySuccess(false);
+
+    try {
+      await api.post("/users/classify");
+      setClassifySuccess(true);
+      await loadUsers();
+      await loadClassificationStatus();
+      await loadClassificationStats();
+      setTimeout(() => setClassifySuccess(false), 5000);
+    } catch (error) {
+      setClassifyError(extractApiError(error, "Failed to run classification. Please try again."));
+    } finally {
+      setIsClassifying(false);
+    }
+  };
+
   useEffect(() => {
-    void Promise.all([loadUsers(), loadTreasury(), loadNodes().catch(() => undefined)]).catch(() => undefined);
+    void Promise.all([
+      loadUsers(),
+      loadTreasury(),
+      loadNodes().catch(() => undefined),
+      loadClassificationStatus().catch(() => undefined),
+      loadClassificationStats().catch(() => undefined)
+    ]).catch(() => undefined);
   }, []);
 
   const closeUserDialog = () => {
@@ -741,73 +781,97 @@ export function UsersPage() {
 
   return (
     <div className="space-y-4">
-      <section className="grid gap-3 xl:grid-cols-[minmax(0,1.1fr),minmax(320px,0.9fr)]">
-        <SectionCard
-          eyebrow="Identity Control"
-          title="Users and access delivery"
-          description="Manage the full customer access flow from one compact workspace, then open QR and import links without leaving the panel."
-          className="!p-4 sm:!p-5"
-          action={
-            <button type="button" onClick={openCreateDialog} className="btn-primary w-full justify-center gap-2 sm:w-auto">
-              <Plus className="h-4 w-4" />
-              Add
-            </button>
-          }
-        >
-          <div className="grid gap-2.5 sm:grid-cols-3">
-            <div className="panel-subtle p-3">
-              <p className="metric-kicker">Total Users</p>
-              <p className="mt-2 font-display text-2xl font-bold text-white">{users.length}</p>
-            </div>
-            <div className="panel-subtle p-3">
-              <p className="metric-kicker">Enabled</p>
-              <p className="mt-2 font-display text-2xl font-bold text-emerald-300">{activeUsers}</p>
-            </div>
-            <div className="panel-subtle p-3">
-              <p className="metric-kicker">Disabled</p>
-              <p className="mt-2 font-display text-2xl font-bold text-slate-300">{disabledUsers}</p>
-            </div>
-          </div>
-        </SectionCard>
-
+      <section className="space-y-3">
+        {/* Unified Users & Usage Card */}
         <div className="panel-surface p-4 sm:p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="metric-kicker">Traffic Snapshot</p>
-              <h3 className="mt-1.5 font-display text-xl font-semibold text-white">Usage posture</h3>
+              <p className="metric-kicker">Users & Usage</p>
+              <h3 className="mt-1.5 font-display text-xl font-semibold text-white">Access & posture</h3>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-sky-400/10 p-2.5 text-sky-300">
-              <Users className="h-4.5 w-4.5" />
+            <button type="button" onClick={openCreateDialog} className="btn-primary inline-flex items-center gap-2">
+              <Plus className="h-4 w-4" />
+              Add User
+            </button>
+          </div>
+
+          {/* User Stats - Minimalist Row */}
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-bold text-white">{users.length}</span>
+              <span className="text-xs text-slate-500">total</span>
+            </div>
+            <div className="h-4 w-px bg-white/10" />
+            <div className="flex items-baseline gap-2">
+              <span className="text-lg font-semibold text-emerald-400">{activeUsers}</span>
+              <span className="text-xs text-slate-500">enabled</span>
+            </div>
+            <div className="h-4 w-px bg-white/10" />
+            <div className="flex items-baseline gap-2">
+              <span className="text-lg font-semibold text-slate-400">{disabledUsers}</span>
+              <span className="text-xs text-slate-500">disabled</span>
+            </div>
+            <div className="ml-auto flex items-center gap-2">
+              <span className="text-xs text-slate-500">Traffic:</span>
+              <span className="text-sm font-semibold text-white">{(totalBandwidth / (1024 ** 3)).toFixed(totalBandwidth >= 1024 ** 3 ? 1 : 2)} GB</span>
+              <span className="text-xs text-slate-500">|</span>
+              <span className="text-xs text-slate-500">Credits:</span>
+              <span className="text-sm font-semibold text-emerald-400">{totalTokens.toFixed(2)}</span>
             </div>
           </div>
-          <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
-            <div className="panel-subtle p-3">
-              <p className="text-sm text-slate-300">Total traffic consumed</p>
-              <p className="mt-1.5 font-display text-2xl font-bold text-white">{(totalBandwidth / (1024 ** 3)).toFixed(totalBandwidth >= 1024 ** 3 ? 1 : 2)} GB</p>
-            </div>
-            <div className="panel-subtle p-3">
-              <p className="text-sm text-slate-300">Remaining user tokens</p>
-              <p className="mt-1.5 font-display text-2xl font-bold text-emerald-300">{totalTokens.toFixed(2)}</p>
-            </div>
-            <div className="panel-subtle flex items-center justify-between p-3">
-              <div className="flex items-center gap-3">
-                <div className="rounded-xl bg-emerald-500/10 p-2 text-emerald-300">
-                  <ShieldCheck className="h-4 w-4" />
-                </div>
-                <p className="text-sm text-slate-300">Sync-ready users</p>
-              </div>
-              <p className="text-lg font-semibold text-white">{activeUsers}</p>
-            </div>
-            <div className="panel-subtle flex items-center justify-between p-3">
-              <div className="flex items-center gap-3">
-                <div className="rounded-xl bg-white/5 p-2 text-slate-300">
-                  <UserRoundX className="h-4 w-4" />
-                </div>
-                <p className="text-sm text-slate-300">Disabled accounts</p>
-              </div>
-              <p className="text-lg font-semibold text-white">{disabledUsers}</p>
+
+          {/* Classification Status - Ultra Minimalist */}
+          <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-white/10 pt-4">
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${classificationStatus?.schedulerActive ? "bg-emerald-500/10 text-emerald-400" : "bg-slate-500/10 text-slate-400"}`}>
+              <Activity className="h-3.5 w-3.5" />
+              {classificationStatus?.schedulerActive ? "Active" : "Inactive"}
+            </span>
+            <span className="text-xs text-slate-500">Types:</span>
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-400">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              Light {classificationStats?.lightUsers ?? 0}
+            </span>
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-400">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+              Medium {classificationStats?.mediumUsers ?? 0}
+            </span>
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-rose-400">
+              <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+              Moderate {classificationStats?.moderateUsers ?? 0}
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <span className="text-xs text-slate-500">Last:</span>
+              <span className="text-xs text-slate-400">{classificationStatus?.lastRunAt ? new Date(classificationStatus.lastRunAt).toLocaleString() : "Not run yet"}</span>
+              <button
+                type="button"
+                onClick={triggerClassification}
+                disabled={isClassifying}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  isClassifying
+                    ? "bg-slate-700 text-slate-400 cursor-not-allowed"
+                    : "bg-sky-600 text-white hover:bg-sky-500"
+                }`}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isClassifying ? "animate-spin" : ""}`} />
+                Run Now
+              </button>
             </div>
           </div>
+
+          {(classifyError || classifySuccess) && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {classifyError && (
+                <div className="rounded-lg bg-rose-500/10 border border-rose-500/20 px-3 py-2 text-xs text-rose-400">
+                  {classifyError}
+                </div>
+              )}
+              {classifySuccess && (
+                <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 text-xs text-emerald-400">
+                  Classification completed
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </section>
 
@@ -834,8 +898,9 @@ export function UsersPage() {
                     <th>Email</th>
                     <th>UUID</th>
                     <th>Status</th>
+                    <th>Type</th>
                     <th>Bandwidth</th>
-                    <th>Tokens</th>
+                    <th>Credits</th>
                     <th>Expiry</th>
                     <th>Actions</th>
                   </tr>
@@ -865,6 +930,28 @@ export function UsersPage() {
                           <span className={`status-pill ${user.enabled ? "text-emerald-300" : "text-slate-400"}`}>
                             <span className={`h-2 w-2 rounded-full ${user.enabled ? "bg-emerald-400" : "bg-slate-500"}`} />
                             {user.enabled ? "enabled" : "disabled"}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] ${
+                            user.userType === "light"
+                              ? "bg-emerald-500/10 text-emerald-200"
+                              : user.userType === "medium"
+                                ? "bg-amber-500/10 text-amber-200"
+                                : user.userType === "moderate"
+                                  ? "bg-rose-500/10 text-rose-200"
+                                  : "bg-slate-500/10 text-slate-200"
+                          }`}>
+                            <span className={`h-1.5 w-1.5 rounded-full ${
+                              user.userType === "light"
+                                ? "bg-emerald-400"
+                                : user.userType === "medium"
+                                  ? "bg-amber-400"
+                                  : user.userType === "moderate"
+                                    ? "bg-rose-400"
+                                    : "bg-slate-400"
+                            }`} />
+                            {user.userType ?? "unknown"}
                           </span>
                         </td>
                         <td className="min-w-[220px]">
@@ -945,7 +1032,7 @@ export function UsersPage() {
                         <p className="mt-1.5 break-words text-sm text-slate-300">{formatDate(summary.expiresAt)}</p>
                       </div>
                       <div className="panel-subtle min-w-0 px-3 py-2.5">
-                        <p className="metric-kicker">Token Balance</p>
+                        <p className="metric-kicker">Credit Balance</p>
                         <p className="mt-1.5 text-sm text-emerald-300">{summary.tokenBalance.toFixed(2)}</p>
                       </div>
                       <div className="panel-subtle min-w-0 px-3 py-2.5">
@@ -1054,7 +1141,7 @@ export function UsersPage() {
 
                 {form.isTesting ? (
                   <div className="rounded-2xl border border-amber-300/20 bg-amber-300/[0.06] px-4 py-3 text-sm text-amber-100">
-                    Testing users skip token funding and bandwidth package rules. They only sync to nodes marked testable.
+                    Testing users skip credit funding and bandwidth package rules. They only sync to nodes marked testable.
                   </div>
                 ) : null}
 
@@ -1103,7 +1190,7 @@ export function UsersPage() {
                     </label>
 
                     <label className="block">
-                      <span className="mb-2 block text-sm font-medium text-slate-300">Tokens</span>
+                      <span className="mb-2 block text-sm font-medium text-slate-300">Credits</span>
                       <input
                         type="number"
                         min={0}
@@ -1161,7 +1248,7 @@ export function UsersPage() {
                         <span className="text-slate-500">Remaining</span> <span className="font-semibold text-white">{formatBandwidthBytes(bandwidthHistoryRemainingBytes)}</span>
                       </div>
                       <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-slate-300">
-                        <span className="text-slate-500">Tokens</span> <span className="font-semibold text-white">{formatTokenAmount(bandwidthHistoryRemainingTokens)}</span>
+                        <span className="text-slate-500">Credits</span> <span className="font-semibold text-white">{formatTokenAmount(bandwidthHistoryRemainingTokens)}</span>
                       </div>
                       <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-slate-300">
                         <span className="text-slate-500">Next expiry</span> <span className="font-semibold text-white">{formatDate(bandwidthHistoryLatestExpiry)}</span>
@@ -1196,17 +1283,17 @@ export function UsersPage() {
                             <div className="rounded-xl bg-slate-950/35 px-3 py-3">
                               <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Remaining</p>
                               <p className="mt-1 text-lg font-semibold text-white">{formatBandwidthBytes(allocation.remainingBandwidthBytes)}</p>
-                              <p className="text-sm text-slate-500">{formatTokenAmount(allocation.remainingTokens)} tokens</p>
+                              <p className="text-sm text-slate-500">{formatTokenAmount(allocation.remainingTokens)} credits</p>
                             </div>
                             <div className="rounded-xl bg-slate-950/35 px-3 py-3">
                               <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Consumed</p>
                               <p className="mt-1 text-lg font-semibold text-white">{formatBandwidthBytes(consumedBytes)}</p>
-                              <p className="text-sm text-slate-500">{formatTokenAmount(consumedTokens)} tokens</p>
+                              <p className="text-sm text-slate-500">{formatTokenAmount(consumedTokens)} credits</p>
                             </div>
                             <div className="rounded-xl bg-slate-950/35 px-3 py-3">
                               <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Total</p>
                               <p className="mt-1 text-lg font-semibold text-white">{formatBandwidthBytes(allocation.totalBandwidthBytes)}</p>
-                              <p className="text-sm text-slate-500">{formatTokenAmount(allocation.tokenAmount)} tokens</p>
+                              <p className="text-sm text-slate-500">{formatTokenAmount(allocation.tokenAmount)} credits</p>
                             </div>
                             <div className="rounded-xl bg-slate-950/35 px-3 py-3">
                               <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Expiry</p>
@@ -1326,7 +1413,7 @@ export function UsersPage() {
 
               {form.isTesting ? (
                 <div className="rounded-2xl border border-amber-300/20 bg-amber-300/[0.06] px-4 py-3 text-sm text-amber-100">
-                  Testing users skip token funding and bandwidth allocation on create, and they only deploy to testable nodes.
+                  Testing users skip credit funding and bandwidth allocation on create, and they only deploy to testable nodes.
                 </div>
               ) : (
                 <div className="grid gap-4 md:grid-cols-3">
@@ -1342,7 +1429,7 @@ export function UsersPage() {
                   </label>
 
                   <label className="block">
-                    <span className="mb-2 block text-sm font-medium text-slate-300">Initial Tokens</span>
+                    <span className="mb-2 block text-sm font-medium text-slate-300">Initial Credits</span>
                     <input
                       type="number"
                       min={0}
@@ -1419,7 +1506,7 @@ export function UsersPage() {
           ) : null}
 
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">
-            Changing expiry does not change bandwidth or token balances for this entry.
+            Changing expiry does not change bandwidth or credit balances for this entry.
           </div>
 
           <label className="block">
@@ -1495,8 +1582,8 @@ export function UsersPage() {
 
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">
             {reductionForm.action === "increase"
-              ? "Tokens are drawn automatically from the main wallet using this entry's token ratio."
-              : "Tokens are refunded automatically to the main wallet using this entry's token ratio."}
+              ? "Credits are drawn automatically from the main wallet using this entry's credit ratio."
+              : "Credits are refunded automatically to the main wallet using this entry's credit ratio."}
           </div>
 
           <div className="flex flex-wrap justify-end gap-3">

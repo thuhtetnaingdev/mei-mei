@@ -11,8 +11,11 @@ type User struct {
 	ExpiresAt            *time.Time                `json:"expiresAt"`
 	BandwidthLimitGB     int64                     `json:"bandwidthLimitGb"`
 	BandwidthUsedBytes   int64                     `json:"bandwidthUsedBytes"`
+	LastWeekMeteredBytes int64                     `json:"lastWeekMeteredBytes" gorm:"default:0"`
 	TokenBalance         float64                   `json:"tokenBalance"`
 	Notes                string                    `json:"notes"`
+	UserType             string                    `json:"userType" gorm:"default:'unknown'"`
+	LastClassifiedAt     *time.Time                `json:"lastClassifiedAt"`
 	BandwidthAllocations []UserBandwidthAllocation `json:"bandwidthAllocations" gorm:"constraint:OnDelete:CASCADE;"`
 	CreatedAt            time.Time                 `json:"createdAt"`
 	UpdatedAt            time.Time                 `json:"updatedAt"`

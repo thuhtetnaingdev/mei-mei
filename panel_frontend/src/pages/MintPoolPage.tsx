@@ -195,7 +195,7 @@ export function MintPoolPage() {
           </div>
           {snapshot.pool.mainWalletBalance < 0 ? (
             <div className="mt-3 rounded-2xl border border-rose-400/20 bg-rose-400/10 px-3 py-3 text-sm text-rose-200">
-              Main wallet is below zero because older user packages were created before treasury enforcement. Mint more Mei to fund the deficit before assigning new user tokens.
+              Main wallet is below zero because older user packages were created before treasury enforcement. Mint more Mei to fund the deficit before assigning new user credits.
             </div>
           ) : null}
         </SectionCard>

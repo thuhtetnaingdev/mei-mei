@@ -37,7 +37,11 @@ func main() {
 		NodeService:     nodeService,
 	})
 
-	router := api.NewRouterWithServices(cfg, database, userService, nodeService, collector)
+	// Start user classification scheduler
+	userClassificationService := services.NewUserClassificationService(database)
+	userClassificationScheduler := services.NewUserClassificationScheduler(userClassificationService, 24*time.Hour)
+
+	router := api.NewRouterWithServices(cfg, database, userService, nodeService, collector, userClassificationService, userClassificationScheduler)
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
 	server := &http.Server{
@@ -48,6 +52,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	collector.Start(ctx)
+	userClassificationScheduler.Start(ctx)
 
 	shutdownDone := make(chan struct{})
 	go func() {
@@ -56,6 +61,7 @@ func main() {
 
 		log.Println("shutting down...")
 		collector.Stop()
+		userClassificationScheduler.Stop()
 
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()

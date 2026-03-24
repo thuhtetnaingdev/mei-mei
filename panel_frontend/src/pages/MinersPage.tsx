@@ -156,7 +156,7 @@ export function MinersPage() {
               </p>
             </div>
             <div className="panel-subtle p-3">
-              <p className="metric-kicker">Rewarded Tokens</p>
+              <p className="metric-kicker">Rewarded Credits</p>
               <p className="mt-2 font-display text-2xl font-bold text-sky-300">
                 {formatTokenAmount(totalRewardedTokens)}
               </p>
@@ -184,7 +184,7 @@ export function MinersPage() {
                   </div>
                   <span className="status-pill">
                     <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                    {formatTokenAmount(miner.rewardedTokens)} tokens
+                    {formatTokenAmount(miner.rewardedTokens)} credits
                   </span>
                 </div>
               ))
@@ -227,7 +227,7 @@ export function MinersPage() {
                 </div>
                 <p className="mt-3 text-sm text-slate-400">{miner.notes || "No notes for this miner."}</p>
                 <div className="mt-3">
-                  <p className="metric-kicker">Rewarded Tokens</p>
+                  <p className="metric-kicker">Rewarded Credits</p>
                   <p className="mt-1.5 text-xl font-semibold text-emerald-300">{formatTokenAmount(miner.rewardedTokens)}</p>
                 </div>
                 <div className="mt-3">

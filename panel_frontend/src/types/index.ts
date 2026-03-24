@@ -1,3 +1,5 @@
+export type UserType = "light" | "medium" | "moderate" | "unknown";
+
 export interface User {
   id: number;
   uuid: string;
@@ -7,10 +9,26 @@ export interface User {
   expiresAt?: string | null;
   bandwidthLimitGb: number;
   bandwidthUsedBytes: number;
+  lastWeekMeteredBytes: number;
   tokenBalance: number;
   notes: string;
   bandwidthAllocations: UserBandwidthAllocation[];
   createdAt: string;
+  userType?: UserType;
+}
+
+export interface UserClassificationStatus {
+  schedulerActive: boolean;
+  lastRunAt?: string | null;
+  nextRunAt?: string | null;
+}
+
+export interface UserClassificationStats {
+  lightUsers: number;
+  mediumUsers: number;
+  moderateUsers: number;
+  unknownUsers: number;
+  totalUsers: number;
 }
 
 export interface UserBandwidthAllocation {

@@ -21,15 +21,17 @@ import (
 )
 
 type Handler struct {
-	cfg                    config.Config
-	jwt                    *auth.JWTManager
-	adminService           *services.AdminService
-	userService            *services.UserService
-	minerService           *services.MinerService
-	nodeService            *services.NodeService
-	mintPoolService        *services.MintPoolService
-	bandwidthReportService *services.BandwidthReportService
-	bandwidthCollector     *services.BandwidthCollectorService
+	cfg                         config.Config
+	jwt                         *auth.JWTManager
+	adminService                *services.AdminService
+	userService                 *services.UserService
+	minerService                *services.MinerService
+	nodeService                 *services.NodeService
+	mintPoolService             *services.MintPoolService
+	bandwidthReportService      *services.BandwidthReportService
+	bandwidthCollector          *services.BandwidthCollectorService
+	userClassificationService   *services.UserClassificationService
+	userClassificationScheduler *services.UserClassificationScheduler
 }
 
 func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
@@ -43,10 +45,12 @@ func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 		UserService:     userService,
 		NodeService:     nodeService,
 	})
-	return NewRouterWithServices(cfg, db, userService, nodeService, bandwidthCollector)
+	userClassificationService := services.NewUserClassificationService(db)
+	userClassificationScheduler := services.NewUserClassificationScheduler(userClassificationService, 24*time.Hour)
+	return NewRouterWithServices(cfg, db, userService, nodeService, bandwidthCollector, userClassificationService, userClassificationScheduler)
 }
 
-func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services.UserService, nodeService *services.NodeService, bandwidthCollector *services.BandwidthCollectorService) *gin.Engine {
+func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services.UserService, nodeService *services.NodeService, bandwidthCollector *services.BandwidthCollectorService, userClassificationService *services.UserClassificationService, userClassificationScheduler *services.UserClassificationScheduler) *gin.Engine {
 	router := gin.Default()
 	router.Use(cors.New(cors.Config{
 		AllowOrigins: cfg.AllowedOrigins,
@@ -56,15 +60,17 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 	}))
 
 	handler := &Handler{
-		cfg:                    cfg,
-		jwt:                    auth.NewJWTManager(cfg.JWTSecret),
-		adminService:           services.NewAdminService(db, cfg.AdminUsername, cfg.AdminPassword),
-		userService:            userService,
-		minerService:           services.NewMinerService(db),
-		mintPoolService:        services.NewMintPoolService(db),
-		bandwidthReportService: services.NewBandwidthReportService(db),
-		nodeService:            nodeService,
-		bandwidthCollector:     bandwidthCollector,
+		cfg:                         cfg,
+		jwt:                         auth.NewJWTManager(cfg.JWTSecret),
+		adminService:                services.NewAdminService(db, cfg.AdminUsername, cfg.AdminPassword),
+		userService:                 userService,
+		minerService:                services.NewMinerService(db),
+		mintPoolService:             services.NewMintPoolService(db),
+		bandwidthReportService:      services.NewBandwidthReportService(db),
+		nodeService:                 nodeService,
+		bandwidthCollector:          bandwidthCollector,
+		userClassificationService:   userClassificationService,
+		userClassificationScheduler: userClassificationScheduler,
 	}
 
 	router.GET("/health", func(c *gin.Context) {
@@ -112,6 +118,9 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 		protected.POST("/nodes/sync", handler.syncNodes)
 		protected.POST("/bandwidth/collect", handler.triggerBandwidthCollection)
 		protected.GET("/bandwidth/status", handler.getBandwidthCollectorStatus)
+		protected.POST("/users/classify", handler.triggerUserClassification)
+		protected.GET("/users/classification/stats", handler.getUserClassificationStats)
+		protected.GET("/users/classification/status", handler.getUserClassificationStatus)
 		protected.GET("/admin/profile", handler.getAdminProfile)
 		protected.PUT("/admin/credentials", handler.updateAdminCredentials)
 		protected.GET("/settings/distribution", handler.getDistributionSettings)
@@ -897,6 +906,60 @@ func (h *Handler) getBandwidthCollectorStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, h.bandwidthCollector.GetStatus())
+}
+
+// triggerUserClassification manually triggers user classification for all users
+func (h *Handler) triggerUserClassification(c *gin.Context) {
+	if h.userClassificationService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "user classification service not initialized"})
+		return
+	}
+
+	classifications, err := h.userClassificationService.ForceClassify()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":          "completed",
+		"classifiedUsers": len(classifications),
+		"classifications": classifications,
+	})
+}
+
+// getUserClassificationStats returns statistics about user classifications
+func (h *Handler) getUserClassificationStats(c *gin.Context) {
+	if h.userClassificationService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "user classification service not initialized"})
+		return
+	}
+
+	stats, err := h.userClassificationService.GetClassificationStats()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, stats)
+}
+
+// getUserClassificationStatus returns the status of the user classification scheduler
+func (h *Handler) getUserClassificationStatus(c *gin.Context) {
+	if h.userClassificationScheduler == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "user classification scheduler not initialized"})
+		return
+	}
+
+	status := h.userClassificationScheduler.GetStatus()
+	serviceStatus := h.userClassificationService.GetStatus()
+
+	// Merge the statuses
+	for k, v := range serviceStatus {
+		status[k] = v
+	}
+
+	c.JSON(http.StatusOK, status)
 }
 
 func timeDurationSeconds(seconds int) time.Duration {
