@@ -66,3 +66,25 @@ type UserRecord struct {
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
+
+// PublicUserResponse represents a sanitized user object for public access
+// It excludes sensitive fields like tokenBalance, notes, and internal allocation details
+type PublicUserResponse struct {
+	ID                 uint                      `json:"id"`
+	UUID               string                    `json:"uuid"`
+	Email              string                    `json:"email"`
+	Enabled            bool                      `json:"enabled"`
+	IsTesting          bool                      `json:"isTesting"`
+	ExpiresAt          *time.Time                `json:"expiresAt,omitempty"`
+	BandwidthLimitGB   int64                     `json:"bandwidthLimitGb"`
+	BandwidthUsedBytes int64                     `json:"bandwidthUsedBytes"`
+	UserType           string                    `json:"userType"`
+	CreatedAt          time.Time                 `json:"createdAt"`
+	UpdatedAt          time.Time                 `json:"updatedAt"`
+	// Computed fields for user convenience
+	BandwidthRemainingGB int64                     `json:"bandwidthRemainingGb"`
+	UsagePercentage      float64                   `json:"usagePercentage"`
+	SubscriptionURL      string                    `json:"subscriptionUrl,omitempty"`
+	SingboxProfileURL    string                    `json:"singboxProfileUrl,omitempty"`
+	ClashProfileURL      string                    `json:"clashProfileUrl,omitempty"`
+}

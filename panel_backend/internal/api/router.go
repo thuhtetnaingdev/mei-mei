@@ -82,6 +82,13 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 	router.GET("/subscription/:userId", handler.getSubscription)
 	router.GET("/profiles/singbox/:uuid", handler.getSingboxProfile)
 
+	// Public API endpoints - no authentication required, rate limited
+	publicAPI := router.Group("/api/public")
+	publicAPI.Use(RateLimiterMiddleware())
+	{
+		publicAPI.GET("/users/:uuid", handler.getPublicUser)
+	}
+
 	// Node API endpoints - authenticated via node tokens
 	nodeAPI := router.Group("/api/nodes")
 	{
@@ -536,6 +543,24 @@ func (h *Handler) getUser(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, user)
+}
+
+// getPublicUser returns a sanitized user object for public access without authentication
+// It excludes sensitive fields like tokenBalance, notes, and detailed allocation information
+func (h *Handler) getPublicUser(c *gin.Context) {
+	uuid := c.Param("uuid")
+	if uuid == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user UUID is required"})
+		return
+	}
+
+	publicUser, err := h.userService.GetPublicUserByUUID(uuid, h.cfg.BasePublicURL)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, publicUser)
 }
 
 func (h *Handler) listUserRecords(c *gin.Context) {

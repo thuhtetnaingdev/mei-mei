@@ -1,4 +1,4 @@
-import { Activity, Calendar, Copy, Link2, Minus, Pencil, Plus, QrCode, Trash2, ChevronUp, ChevronDown, Search } from "lucide-react";
+import { Activity, Calendar, Copy, Link2, Minus, Pencil, Plus, QrCode, Trash2, ChevronUp, ChevronDown, Search, Share2 } from "lucide-react";
 import { FormEvent, useEffect, useState, useCallback, useRef } from "react";
 import axios from "axios";
 import QRCode from "qrcode";
@@ -385,6 +385,7 @@ export function UsersPage() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [qrCodeUrl, setQrCodeURL] = useState("");
   const [copiedKey, setCopiedKey] = useState("");
+  const [copiedPublicUrl, setCopiedPublicUrl] = useState(false);
   const [formStatus, setFormStatus] = useState("");
   const [formError, setFormError] = useState("");
   const [mainWalletBalance, setMainWalletBalance] = useState<number | null>(null);
@@ -577,6 +578,7 @@ export function UsersPage() {
     setAccessError("");
     setQrCodeURL("");
     setCopiedKey("");
+    setCopiedPublicUrl(false);
   };
 
   const startEdit = (user: User) => {
@@ -789,6 +791,35 @@ export function UsersPage() {
       }, 1600);
     } catch {
       setCopiedKey("");
+    }
+  };
+
+  const copyPublicUrl = async () => {
+    if (!selectedUser?.uuid) {
+      return;
+    }
+
+    try {
+      const publicUrl = `${window.location.origin}/u/${selectedUser.uuid}`;
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(publicUrl);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = publicUrl;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setCopiedPublicUrl(true);
+      window.setTimeout(() => {
+        setCopiedPublicUrl(false);
+      }, 1600);
+    } catch {
+      setCopiedPublicUrl(false);
     }
   };
 
@@ -1828,6 +1859,18 @@ export function UsersPage() {
                         </div>
                       )}
                     </div>
+                    {selectedUser?.uuid && (
+                      <div className="mt-4 flex justify-center">
+                        <button
+                          type="button"
+                          onClick={copyPublicUrl}
+                          className="btn-secondary w-full justify-center gap-2 px-4 py-2 text-sm"
+                        >
+                          <Share2 className="h-4 w-4" />
+                          {copiedPublicUrl ? "Copied!" : "Share Public URL"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 

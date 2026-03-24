@@ -262,3 +262,24 @@ export interface UserListOptions {
   page?: number;
   pageSize?: number;
 }
+
+// Public user response - sanitized user data for public access
+export interface PublicUserResponse {
+  id: number;
+  uuid: string;
+  email: string;
+  enabled: boolean;
+  isTesting: boolean;
+  expiresAt?: string | null;
+  bandwidthLimitGb: number;
+  bandwidthUsedBytes: number;
+  userType: string;
+  createdAt: string;
+  updatedAt: string;
+  // Computed fields for user convenience
+  bandwidthRemainingGb: number;
+  usagePercentage: number;
+  subscriptionUrl: string;
+  singboxProfileUrl: string;
+  clashProfileUrl: string;
+}

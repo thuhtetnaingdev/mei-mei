@@ -8,11 +8,16 @@ import { MinersPage } from "./pages/MinersPage";
 import { NodesPage } from "./pages/NodesPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { UsersPage } from "./pages/UsersPage";
+import { PublicUserPage } from "./pages/PublicUserPage";
 
 export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      
+      {/* Public routes - no authentication required */}
+      <Route path="/u/:uuid" element={<PublicUserPage />} />
+      
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
           <Route path="/" element={<DashboardPage />} />

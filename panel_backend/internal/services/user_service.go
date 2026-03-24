@@ -375,6 +375,63 @@ func (s *UserService) GetByUUID(uuid string) (*models.User, error) {
 	return &user, nil
 }
 
+// GetPublicUserByUUID returns a sanitized user object suitable for public access
+// It excludes sensitive fields like tokenBalance, notes, and detailed allocation information
+func (s *UserService) GetPublicUserByUUID(uuid string, basePublicURL string) (*models.PublicUserResponse, error) {
+	if err := s.settleExpiredAllocations(); err != nil {
+		return nil, err
+	}
+
+	var user models.User
+	err := s.db.
+		Preload("BandwidthAllocations", preloadUserAllocations).
+		First(&user, "uuid = ?", uuid).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Hydrate user summary to get latest bandwidth calculations
+	s.hydrateUserSummary(&user)
+
+	// Calculate remaining bandwidth and usage percentage
+	remainingBytes := user.BandwidthLimitGB*bytesPerGB - user.BandwidthUsedBytes
+	if remainingBytes < 0 {
+		remainingBytes = 0
+	}
+	remainingGB := remainingBytes / bytesPerGB
+
+	usagePercentage := 0.0
+	if user.BandwidthLimitGB > 0 {
+		usagePercentage = float64(user.BandwidthUsedBytes) / float64(user.BandwidthLimitGB*bytesPerGB) * 100
+	}
+
+	// Build public response with subscription URLs
+	publicUser := &models.PublicUserResponse{
+		ID:                   user.ID,
+		UUID:                 user.UUID,
+		Email:                user.Email,
+		Enabled:              user.Enabled,
+		IsTesting:            user.IsTesting,
+		ExpiresAt:            user.ExpiresAt,
+		BandwidthLimitGB:     user.BandwidthLimitGB,
+		BandwidthUsedBytes:   user.BandwidthUsedBytes,
+		UserType:             user.UserType,
+		CreatedAt:            user.CreatedAt,
+		UpdatedAt:            user.UpdatedAt,
+		BandwidthRemainingGB: remainingGB,
+		UsagePercentage:      usagePercentage,
+	}
+
+	// Only include subscription URLs if user is enabled
+	if user.Enabled {
+		publicUser.SubscriptionURL = basePublicURL + "/subscription/" + uuid
+		publicUser.SingboxProfileURL = basePublicURL + "/profiles/singbox/" + uuid
+		publicUser.ClashProfileURL = basePublicURL + "/profiles/singbox/" + uuid + "?format=clash"
+	}
+
+	return publicUser, nil
+}
+
 func (s *UserService) Delete(id string) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		var user models.User
