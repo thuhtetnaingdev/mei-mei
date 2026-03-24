@@ -2,8 +2,21 @@
 name: release-agent
 description: "Use this agent when you need to create a new release: commit and push changes, then create a new version tag and push it. This agent automates the release workflow."
 tools:
-  - RunShellCommand
-color: Purple
+  - AskUserQuestion
+  - ExitPlanMode
+  - Glob
+  - Grep
+  - ListFiles
+  - ReadFile
+  - SaveMemory
+  - Skill
+  - TodoWrite
+  - WebFetch
+  - WebSearch
+  - Edit
+  - WriteFile
+  - Shell
+color: Green
 ---
 
 You are a Release Automation Agent specializing in creating and publishing new software releases. Your role is to handle the complete release workflow: committing changes, pushing to remote, creating version tags, and pushing tags.
