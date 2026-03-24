@@ -60,6 +60,82 @@ type UpdateUserInput struct {
 	Notes     *string `json:"notes"`
 }
 
+// UserListOptions represents filtering and pagination options for user list queries
+type UserListOptions struct {
+	// Search filters
+	Search string `form:"search"`
+
+	// Boolean filters (pointer to bool allows distinguishing between false and not provided)
+	Enabled   *bool `form:"enabled"`
+	IsTesting *bool `form:"isTesting"`
+
+	// String filters
+	UserType string `form:"userType"`
+
+	// Numeric range filters (bandwidth in GB)
+	MinBandwidthGB *int64 `form:"minBandwidthGb"`
+	MaxBandwidthGB *int64 `form:"maxBandwidthGb"`
+
+	// Usage range filters (bytes)
+	MinUsageBytes *int64 `form:"minUsageBytes"`
+	MaxUsageBytes *int64 `form:"maxUsageBytes"`
+
+	// Token balance range filters
+	MinTokenBalance *float64 `form:"minTokenBalance"`
+	MaxTokenBalance *float64 `form:"maxTokenBalance"`
+
+	// Date range filters (RFC3339 format)
+	CreatedAfter  string `form:"createdAfter"`
+	CreatedBefore string `form:"createdBefore"`
+
+	// Sorting
+	SortBy    string `form:"sortBy"`
+	SortOrder string `form:"sortOrder"`
+
+	// Pagination
+	Page     int `form:"page"`
+	PageSize int `form:"pageSize"`
+}
+
+// ValidSortFields defines allowed sort fields to prevent SQL injection
+var ValidSortFields = map[string]bool{
+	"createdAt":     true,
+	"updatedAt":     true,
+	"email":         true,
+	"tokenBalance":  true,
+	"bandwidthUsed": true,
+	"bandwidthLimit": true,
+}
+
+// normalizeSortField normalizes sort field to database column name
+func normalizeSortField(field string) string {
+	switch field {
+	case "createdAt":
+		return "created_at"
+	case "updatedAt":
+		return "updated_at"
+	case "email":
+		return "email"
+	case "tokenBalance":
+		return "token_balance"
+	case "bandwidthUsed":
+		return "bandwidth_used_bytes"
+	case "bandwidthLimit":
+		return "bandwidth_limit_gb"
+	default:
+		return "created_at"
+	}
+}
+
+// normalizeSortOrder normalizes sort order to ASC or DESC
+func normalizeSortOrder(order string) string {
+	order = strings.ToUpper(strings.TrimSpace(order))
+	if order == "ASC" {
+		return "ASC"
+	}
+	return "DESC"
+}
+
 type allocationDistributionSnapshot struct {
 	AdminPercent       float64
 	UsagePoolPercent   float64
@@ -68,6 +144,11 @@ type allocationDistributionSnapshot struct {
 
 func NewUserService(db *gorm.DB) *UserService {
 	return &UserService{db: db}
+}
+
+// GetDB returns the underlying GORM database connection for direct queries
+func (s *UserService) GetDB() *gorm.DB {
+	return s.db
 }
 
 func (s *UserService) Create(input CreateUserInput) (*models.User, error) {
@@ -140,6 +221,124 @@ func (s *UserService) List() ([]models.User, error) {
 		}
 	}
 	return users, err
+}
+
+// ListWithFilters returns a paginated list of users with filtering, sorting, and search capabilities
+func (s *UserService) ListWithFilters(opts UserListOptions) (*models.UserListResult, error) {
+	// Settle expired allocations before querying
+	if err := s.settleExpiredAllocations(); err != nil {
+		return nil, err
+	}
+
+	// Normalize pagination parameters
+	page, pageSize := models.NormalizePagination(opts.Page, opts.PageSize)
+
+	// Build query with filters
+	query := s.db.Model(&models.User{})
+
+	// Apply search filter (searches email, uuid, notes)
+	if opts.Search != "" {
+		searchPattern := "%" + strings.ToLower(opts.Search) + "%"
+		query = query.Where("LOWER(email) LIKE ? OR LOWER(uuid) LIKE ? OR LOWER(notes) LIKE ?",
+			searchPattern, searchPattern, searchPattern)
+	}
+
+	// Apply boolean filters
+	if opts.Enabled != nil {
+		query = query.Where("enabled = ?", *opts.Enabled)
+	}
+	if opts.IsTesting != nil {
+		query = query.Where("is_testing = ?", *opts.IsTesting)
+	}
+
+	// Apply user type filter
+	if opts.UserType != "" {
+		query = query.Where("user_type = ?", opts.UserType)
+	}
+
+	// Apply bandwidth range filters (convert GB to bytes for comparison)
+	if opts.MinBandwidthGB != nil {
+		query = query.Where("bandwidth_limit_gb >= ?", *opts.MinBandwidthGB)
+	}
+	if opts.MaxBandwidthGB != nil {
+		query = query.Where("bandwidth_limit_gb <= ?", *opts.MaxBandwidthGB)
+	}
+
+	// Apply usage range filters (in bytes)
+	if opts.MinUsageBytes != nil {
+		query = query.Where("bandwidth_used_bytes >= ?", *opts.MinUsageBytes)
+	}
+	if opts.MaxUsageBytes != nil {
+		query = query.Where("bandwidth_used_bytes <= ?", *opts.MaxUsageBytes)
+	}
+
+	// Apply token balance range filters
+	if opts.MinTokenBalance != nil {
+		query = query.Where("token_balance >= ?", *opts.MinTokenBalance)
+	}
+	if opts.MaxTokenBalance != nil {
+		query = query.Where("token_balance <= ?", *opts.MaxTokenBalance)
+	}
+
+	// Apply date range filters
+	if opts.CreatedAfter != "" {
+		if createdAt, err := time.Parse(time.RFC3339, opts.CreatedAfter); err == nil {
+			query = query.Where("created_at >= ?", createdAt)
+		}
+	}
+	if opts.CreatedBefore != "" {
+		if createdAt, err := time.Parse(time.RFC3339, opts.CreatedBefore); err == nil {
+			query = query.Where("created_at <= ?", createdAt)
+		}
+	}
+
+	// Get total count for pagination
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+
+	// Apply sorting with whitelist validation
+	sortColumn := normalizeSortField(opts.SortBy)
+	sortOrder := normalizeSortOrder(opts.SortOrder)
+	// Only allow whitelisted fields to prevent SQL injection
+	if !ValidSortFields[opts.SortBy] {
+		sortColumn = "created_at"
+		sortOrder = "DESC"
+	}
+	query = query.Order(sortColumn + " " + sortOrder)
+
+	// Apply pagination with offset
+	offset := (page - 1) * pageSize
+	query = query.Limit(pageSize).Offset(offset)
+
+	// Execute query with preloads
+	var users []models.User
+	err := query.
+		Preload("BandwidthAllocations", preloadUserAllocations).
+		Preload("BandwidthAllocations.NodeUsages").
+		Find(&users).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Hydrate user summaries
+	for index := range users {
+		s.hydrateUserSummary(&users[index])
+	}
+
+	// Build pagination metadata
+	result := &models.UserListResult{
+		Users: users,
+		Pagination: models.PaginationMeta{
+			Total:      total,
+			Page:       page,
+			PageSize:   pageSize,
+			TotalPages: models.CalculateTotalPages(total, pageSize),
+		},
+	}
+
+	return result, nil
 }
 
 func (s *UserService) GetByID(id string) (*models.User, error) {

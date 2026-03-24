@@ -31,6 +31,13 @@ export interface UserClassificationStats {
   totalUsers: number;
 }
 
+export interface UserStats {
+  totalUsers: number;
+  enabledUsers: number;
+  disabledUsers: number;
+  testingUsers: number;
+}
+
 export interface UserBandwidthAllocation {
   id: number;
   userId: number;
@@ -205,4 +212,53 @@ export interface MintPoolSnapshot {
   pool: MintPoolState;
   history: MintPoolEvent[];
   transfers: MintPoolTransferEvent[];
+}
+
+// Pagination types
+export interface PaginationMeta {
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export interface UserListResult {
+  users: User[];
+  pagination: PaginationMeta;
+}
+
+export interface UserListOptions {
+  // Search filters
+  search?: string;
+
+  // Boolean filters
+  enabled?: boolean;
+  isTesting?: boolean;
+
+  // String filters
+  userType?: UserType | "";
+
+  // Numeric range filters (bandwidth in GB)
+  minBandwidthGb?: number | null;
+  maxBandwidthGb?: number | null;
+
+  // Usage range filters (bytes)
+  minUsageBytes?: number | null;
+  maxUsageBytes?: number | null;
+
+  // Token balance range filters
+  minTokenBalance?: number | null;
+  maxTokenBalance?: number | null;
+
+  // Date range filters (RFC3339 format)
+  createdAfter?: string | null;
+  createdBefore?: string | null;
+
+  // Sorting
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
+
+  // Pagination
+  page?: number;
+  pageSize?: number;
 }

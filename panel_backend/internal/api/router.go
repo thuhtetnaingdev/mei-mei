@@ -12,6 +12,7 @@ import (
 	"panel_backend/internal/services"
 	"panel_backend/internal/subscription"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -92,6 +93,7 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 	{
 		protected.POST("/users", handler.createUser)
 		protected.GET("/users", handler.listUsers)
+		protected.GET("/users/stats", handler.getUserStats)
 		protected.GET("/users/:id", handler.getUser)
 		protected.GET("/users/:id/records", handler.listUserRecords)
 		protected.POST("/users/:id/bandwidth-allocations", handler.addUserBandwidthAllocation)
@@ -431,12 +433,100 @@ func (h *Handler) deleteMiner(c *gin.Context) {
 }
 
 func (h *Handler) listUsers(c *gin.Context) {
-	users, err := h.userService.List()
+	var opts services.UserListOptions
+
+	// Bind query parameters to options struct
+	if err := c.ShouldBindQuery(&opts); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid query parameters: " + err.Error()})
+		return
+	}
+
+	// Parse boolean query parameters manually (Gin's ShouldBindQuery doesn't handle string-to-bool well for optional bools)
+	if enabledStr := c.Query("enabled"); enabledStr != "" {
+		enabled := enabledStr == "true"
+		opts.Enabled = &enabled
+	}
+	if isTestingStr := c.Query("isTesting"); isTestingStr != "" {
+		isTesting := isTestingStr == "true"
+		opts.IsTesting = &isTesting
+	}
+
+	// Parse numeric query parameters
+	if minBandwidthStr := c.Query("minBandwidthGb"); minBandwidthStr != "" {
+		if val, err := strconv.ParseInt(minBandwidthStr, 10, 64); err == nil {
+			opts.MinBandwidthGB = &val
+		}
+	}
+	if maxBandwidthStr := c.Query("maxBandwidthGb"); maxBandwidthStr != "" {
+		if val, err := strconv.ParseInt(maxBandwidthStr, 10, 64); err == nil {
+			opts.MaxBandwidthGB = &val
+		}
+	}
+	if minUsageStr := c.Query("minUsageBytes"); minUsageStr != "" {
+		if val, err := strconv.ParseInt(minUsageStr, 10, 64); err == nil {
+			opts.MinUsageBytes = &val
+		}
+	}
+	if maxUsageStr := c.Query("maxUsageBytes"); maxUsageStr != "" {
+		if val, err := strconv.ParseInt(maxUsageStr, 10, 64); err == nil {
+			opts.MaxUsageBytes = &val
+		}
+	}
+	if minTokenStr := c.Query("minTokenBalance"); minTokenStr != "" {
+		if val, err := strconv.ParseFloat(minTokenStr, 64); err == nil {
+			opts.MinTokenBalance = &val
+		}
+	}
+	if maxTokenStr := c.Query("maxTokenBalance"); maxTokenStr != "" {
+		if val, err := strconv.ParseFloat(maxTokenStr, 64); err == nil {
+			opts.MaxTokenBalance = &val
+		}
+	}
+
+	// Get paginated and filtered user list
+	result, err := h.userService.ListWithFilters(opts)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, users)
+
+	c.JSON(http.StatusOK, result)
+}
+
+// getUserStats returns lightweight user statistics without fetching full user records
+func (h *Handler) getUserStats(c *gin.Context) {
+	var totalUsers, enabledUsers, disabledUsers, testingUsers int64
+
+	// Count total users
+	if err := h.userService.GetDB().Model(&models.User{}).Count(&totalUsers).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count total users: " + err.Error()})
+		return
+	}
+
+	// Count enabled users
+	if err := h.userService.GetDB().Model(&models.User{}).Where("enabled = ?", true).Count(&enabledUsers).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count enabled users: " + err.Error()})
+		return
+	}
+
+	// Count disabled users
+	if err := h.userService.GetDB().Model(&models.User{}).Where("enabled = ?", false).Count(&disabledUsers).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count disabled users: " + err.Error()})
+		return
+	}
+
+	// Count testing users
+	if err := h.userService.GetDB().Model(&models.User{}).Where("is_testing = ?", true).Count(&testingUsers).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count testing users: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"totalUsers":    totalUsers,
+		"enabledUsers":  enabledUsers,
+		"disabledUsers": disabledUsers,
+		"testingUsers":  testingUsers,
+	})
 }
 
 func (h *Handler) getUser(c *gin.Context) {

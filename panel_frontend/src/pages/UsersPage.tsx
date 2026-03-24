@@ -1,12 +1,14 @@
-import { Activity, Calendar, Copy, Link2, Minus, Pencil, Plus, QrCode, Trash2 } from "lucide-react";
-import { FormEvent, useEffect, useState } from "react";
+import { Activity, Calendar, Copy, Link2, Minus, Pencil, Plus, QrCode, Trash2, ChevronUp, ChevronDown, Search } from "lucide-react";
+import { FormEvent, useEffect, useState, useCallback, useRef } from "react";
 import axios from "axios";
 import QRCode from "qrcode";
-import api from "../api/client";
+import api, { listUsers } from "../api/client";
 import { BandwidthUsage } from "../components/BandwidthUsage";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { SectionCard } from "../components/SectionCard";
-import type { MintPoolSnapshot, Node, User, UserBandwidthAllocation, UserClassificationStatus, UserClassificationStats } from "../types";
+import { Pagination } from "../components/Pagination";
+import { UserFilters } from "../components/UserFilters";
+import type { MintPoolSnapshot, Node, User, UserBandwidthAllocation, UserClassificationStatus, UserClassificationStats, UserListOptions, UserListResult, PaginationMeta } from "../types";
 
 interface SubscriptionResponse {
   userId: number;
@@ -343,6 +345,26 @@ function NodeUsageRing({ percentage, emphasis }: NodeUsageRingProps) {
 export function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [nodes, setNodes] = useState<Node[]>([]);
+  
+  // Pagination and filtering state
+  const [pagination, setPagination] = useState<PaginationMeta>({
+    total: 0,
+    page: 1,
+    pageSize: 20,
+    totalPages: 1
+  });
+  const [filters, setFilters] = useState<UserListOptions>({
+    page: 1,
+    pageSize: 20,
+    sortBy: "createdAt",
+    sortOrder: "desc"
+  });
+  const [loading, setLoading] = useState(false);
+  const [sortConfig, setSortConfig] = useState<{ sortBy: string; sortOrder: "asc" | "desc" }>({
+    sortBy: "createdAt",
+    sortOrder: "desc"
+  });
+
   const [form, setForm] = useState<UserFormState>(defaultFormState);
   const [allocationForm, setAllocationForm] = useState<AllocationFormState>(defaultAllocationForm);
   const [editingUserId, setEditingUserId] = useState<number | null>(null);
@@ -369,7 +391,49 @@ export function UsersPage() {
   const [classificationStatus, setClassificationStatus] = useState<UserClassificationStatus | undefined>(undefined);
   const [classificationStats, setClassificationStats] = useState<UserClassificationStats | undefined>(undefined);
 
-  const loadUsers = () => api.get<User[]>("/users").then((res) => setUsers(res.data));
+  // Debounced search
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const loadUsers = useCallback(async (options?: UserListOptions) => {
+    setLoading(true);
+    try {
+      // Use provided options or current filters state
+      const loadOptions = options ?? filters;
+      const result = await listUsers(loadOptions);
+      setUsers(result.users);
+      setPagination(result.pagination);
+      // Only update filters if options were explicitly provided
+      if (options) {
+        setFilters(options);
+      }
+    } catch (error) {
+      console.error("Failed to load users:", error);
+      setUsers([]);
+      setPagination({ total: 0, page: 1, pageSize: (options?.pageSize ?? filters.pageSize) || 20, totalPages: 1 });
+    } finally {
+      setLoading(false);
+    }
+  }, [filters]);
+
+  // Use a ref to store the current filters for debounced search to avoid stale closures
+  const filtersRef = useRef<UserListOptions>(filters);
+  useEffect(() => {
+    filtersRef.current = filters;
+  }, [filters]);
+
+  const debouncedSearch = useCallback((search: string | undefined) => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    searchTimeoutRef.current = setTimeout(() => {
+      // Use the ref to get current filters instead of closure
+      const currentFilters = filtersRef.current;
+      const newFilters = { ...currentFilters, search: search || undefined, page: 1 };
+      void loadUsers(newFilters);
+    }, 400);
+  }, [loadUsers]);
+
   const loadNodes = () => api.get<Node[]>("/nodes").then((res) => setNodes(res.data));
   const loadTreasury = () =>
     api.get<MintPoolSnapshot>("/mint-pool").then((res) => setMainWalletBalance(res.data.pool.mainWalletBalance));
@@ -401,6 +465,12 @@ export function UsersPage() {
       loadTreasury(),
       loadNodes().catch(() => undefined)
     ]).catch(() => undefined);
+    
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
   }, []);
 
   const closeUserDialog = () => {
@@ -657,6 +727,43 @@ export function UsersPage() {
     await loadUsers();
   };
 
+  // Pagination and filter handlers
+  const handlePageChange = useCallback((newPage: number) => {
+    const newFilters = { ...filters, page: newPage };
+    void loadUsers(newFilters);
+  }, [filters, loadUsers]);
+
+  const handlePageSizeChange = useCallback((newPageSize: number) => {
+    const newFilters = { ...filters, page: 1, pageSize: newPageSize };
+    void loadUsers(newFilters);
+  }, [filters, loadUsers]);
+
+  const handleFiltersChange = useCallback((newFilters: UserListOptions) => {
+    const mergedFilters = {
+      ...filters,
+      ...newFilters,
+      page: 1 // Reset to first page when filters change
+    };
+    void loadUsers(mergedFilters);
+  }, [filters, loadUsers]);
+
+  const handleResetFilters = useCallback(() => {
+    const defaultFilters: UserListOptions = {
+      page: 1,
+      pageSize: filters.pageSize || 20,
+      sortBy: sortConfig.sortBy,
+      sortOrder: sortConfig.sortOrder
+    };
+    void loadUsers(defaultFilters);
+  }, [filters.pageSize, sortConfig, loadUsers]);
+
+  const handleSort = useCallback((sortBy: string) => {
+    const newSortOrder: "asc" | "desc" = sortConfig.sortBy === sortBy && sortConfig.sortOrder === "asc" ? "desc" : "asc";
+    setSortConfig({ sortBy, sortOrder: newSortOrder });
+    const newFilters = { ...filters, sortBy, sortOrder: newSortOrder, page: 1 };
+    void loadUsers(newFilters);
+  }, [filters, sortConfig, loadUsers]);
+
   const copyText = async (value: string, key: string) => {
     if (!value) {
       return;
@@ -685,10 +792,6 @@ export function UsersPage() {
     }
   };
 
-  const activeUsers = users.filter((user) => user.enabled).length;
-  const disabledUsers = users.length - activeUsers;
-  const totalBandwidth = users.reduce((sum, user) => sum + user.bandwidthUsedBytes, 0);
-  const totalTokens = users.reduce((sum, user) => sum + (user.tokenBalance ?? 0), 0);
   const accessCards = selectedAccess
     ? [
         {
@@ -774,25 +877,25 @@ export function UsersPage() {
           {/* User Stats - Minimalist Row */}
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-bold text-white">{users.length}</span>
+              <span className="text-2xl font-bold text-white">{pagination.total}</span>
               <span className="text-xs text-slate-500">total</span>
             </div>
             <div className="h-4 w-px bg-white/10" />
             <div className="flex items-baseline gap-2">
-              <span className="text-lg font-semibold text-emerald-400">{activeUsers}</span>
+              <span className="text-lg font-semibold text-emerald-400">{users.filter(u => u.enabled).length}</span>
               <span className="text-xs text-slate-500">enabled</span>
             </div>
             <div className="h-4 w-px bg-white/10" />
             <div className="flex items-baseline gap-2">
-              <span className="text-lg font-semibold text-slate-400">{disabledUsers}</span>
+              <span className="text-lg font-semibold text-slate-400">{users.filter(u => !u.enabled).length}</span>
               <span className="text-xs text-slate-500">disabled</span>
             </div>
             <div className="ml-auto flex items-center gap-2">
-              <span className="text-xs text-slate-500">Traffic:</span>
-              <span className="text-sm font-semibold text-white">{(totalBandwidth / (1024 ** 3)).toFixed(totalBandwidth >= 1024 ** 3 ? 1 : 2)} GB</span>
-              <span className="text-xs text-slate-500">|</span>
-              <span className="text-xs text-slate-500">Credits:</span>
-              <span className="text-sm font-semibold text-emerald-400">{totalTokens.toFixed(2)}</span>
+              <span className="text-xs text-slate-500">Showing:</span>
+              <span className="text-sm font-semibold text-white">{users.length}</span>
+              <span className="text-xs text-slate-500">of</span>
+              <span className="text-sm font-semibold text-white">{pagination.total}</span>
+              <span className="text-xs text-slate-500">users</span>
             </div>
           </div>
 
@@ -838,183 +941,289 @@ export function UsersPage() {
             </div>
           ) : null}
 
-          <div className="hidden overflow-hidden rounded-[24px] border border-white/10 lg:block">
-            <div className="overflow-x-auto">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Email</th>
-                    <th>UUID</th>
-                    <th>Status</th>
-                    <th>Type</th>
-                    <th>Bandwidth</th>
-                    <th>Credits</th>
-                    <th>Expiry</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map((user) => {
-                    const summary = deriveUserSummary(user);
+          {/* Filters and Search */}
+          <UserFilters
+            filters={filters}
+            onFiltersChange={handleFiltersChange}
+            onReset={handleResetFilters}
+            totalResults={pagination.total}
+            onSearchChange={debouncedSearch}
+          />
 
-                    return (
-                      <tr key={user.id} className="bg-transparent">
-                        <td>
-                          <div className="min-w-[180px]">
-                            <p className="font-semibold text-white">{user.email}</p>
-                            <div className="mt-1 flex flex-wrap gap-1.5">
-                              {user.isTesting ? (
-                                <span className="status-pill text-[10px] text-amber-200">
-                                  <span className="h-2 w-2 rounded-full bg-amber-300" />
-                                  testing
-                                </span>
-                              ) : null}
-                            </div>
-                            <p className="mt-1 text-xs text-slate-500">{user.notes || "No notes"}</p>
-                          </div>
-                        </td>
-                        <td className="font-mono text-xs text-slate-400">{user.uuid}</td>
-                        <td>
-                          <span className={`status-pill ${user.enabled ? "text-emerald-300" : "text-slate-400"}`}>
-                            <span className={`h-2 w-2 rounded-full ${user.enabled ? "bg-emerald-400" : "bg-slate-500"}`} />
-                            {user.enabled ? "enabled" : "disabled"}
-                          </span>
-                        </td>
-                        <td>
-                          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] ${
-                            user.userType === "light"
-                              ? "bg-emerald-500/10 text-emerald-200"
-                              : user.userType === "medium"
-                                ? "bg-amber-500/10 text-amber-200"
-                                : user.userType === "moderate"
-                                  ? "bg-rose-500/10 text-rose-200"
-                                  : "bg-slate-500/10 text-slate-200"
-                          }`}>
-                            <span className={`h-1.5 w-1.5 rounded-full ${
-                              user.userType === "light"
-                                ? "bg-emerald-400"
-                                : user.userType === "medium"
-                                  ? "bg-amber-400"
-                                  : user.userType === "moderate"
-                                    ? "bg-rose-400"
-                                    : "bg-slate-400"
-                            }`} />
-                            {user.userType ?? "unknown"}
-                          </span>
-                        </td>
-                        <td className="min-w-[220px]">
-                          <BandwidthUsage usedBytes={user.bandwidthUsedBytes} limitGb={summary.bandwidthLimitGb} showDetails={false} />
-                          <p className="mt-2 text-xs text-slate-500">{(user.bandwidthAllocations ?? []).length} bandwidth entries</p>
-                        </td>
-                        <td className="text-sm font-semibold text-emerald-300">{summary.tokenBalance.toFixed(2)}</td>
-                        <td className="text-sm text-slate-400">{formatDate(summary.expiresAt)}</td>
-                        <td className="min-w-[150px]">
-                          <div className="grid grid-cols-3 gap-1.5">
-                            <button
-                              onClick={() => void openAccess(user)}
-                              className="btn-primary justify-center px-0 py-2 text-xs"
-                              title="QR"
-                              aria-label={`Open QR for ${user.email}`}
-                            >
-                              <QrCode className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              onClick={() => startEdit(user)}
-                              className="btn-secondary justify-center px-0 py-2 text-xs"
-                              title="Edit"
-                              aria-label={`Edit ${user.email}`}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              onClick={() => setDeleteTarget(user)}
-                              className="btn-danger justify-center px-0 py-2 text-xs"
-                              title="Delete"
-                              aria-label={`Delete ${user.email}`}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+          {/* Loading state */}
+          {loading && (
+            <div className="flex items-center justify-center py-12">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
+            </div>
+          )}
+
+          {/* User table - Desktop */}
+          {!loading && (
+            <div className="hidden overflow-x-auto lg:block">
+              <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th className="cursor-pointer select-none hover:bg-white/[0.05]" onClick={() => handleSort("email")}>
+                        <div className="flex items-center gap-1">
+                          Email
+                          {sortConfig.sortBy === "email" && (
+                            <ChevronUp className={`h-3.5 w-3.5 transition-transform ${sortConfig.sortOrder === "desc" ? "rotate-180" : ""}`} />
+                          )}
+                        </div>
+                      </th>
+                      <th className="cursor-pointer select-none hover:bg-white/[0.05]" onClick={() => handleSort("uuid")}>
+                        <div className="flex items-center gap-1">
+                          UUID
+                          {sortConfig.sortBy === "uuid" && (
+                            <ChevronUp className={`h-3.5 w-3.5 transition-transform ${sortConfig.sortOrder === "desc" ? "rotate-180" : ""}`} />
+                          )}
+                        </div>
+                      </th>
+                      <th className="cursor-pointer select-none hover:bg-white/[0.05]" onClick={() => handleSort("enabled")}>
+                        <div className="flex items-center gap-1">
+                          Status
+                          {sortConfig.sortBy === "enabled" && (
+                            <ChevronUp className={`h-3.5 w-3.5 transition-transform ${sortConfig.sortOrder === "desc" ? "rotate-180" : ""}`} />
+                          )}
+                        </div>
+                      </th>
+                      <th className="cursor-pointer select-none hover:bg-white/[0.05]" onClick={() => handleSort("userType")}>
+                        <div className="flex items-center gap-1">
+                          Type
+                          {sortConfig.sortBy === "userType" && (
+                            <ChevronUp className={`h-3.5 w-3.5 transition-transform ${sortConfig.sortOrder === "desc" ? "rotate-180" : ""}`} />
+                          )}
+                        </div>
+                      </th>
+                      <th className="cursor-pointer select-none hover:bg-white/[0.05]" onClick={() => handleSort("bandwidthLimitGb")}>
+                        <div className="flex items-center gap-1">
+                          Bandwidth
+                          {sortConfig.sortBy === "bandwidthLimitGb" && (
+                            <ChevronUp className={`h-3.5 w-3.5 transition-transform ${sortConfig.sortOrder === "desc" ? "rotate-180" : ""}`} />
+                          )}
+                        </div>
+                      </th>
+                      <th className="cursor-pointer select-none hover:bg-white/[0.05]" onClick={() => handleSort("tokenBalance")}>
+                        <div className="flex items-center gap-1">
+                          Credits
+                          {sortConfig.sortBy === "tokenBalance" && (
+                            <ChevronUp className={`h-3.5 w-3.5 transition-transform ${sortConfig.sortOrder === "desc" ? "rotate-180" : ""}`} />
+                          )}
+                        </div>
+                      </th>
+                      <th className="cursor-pointer select-none hover:bg-white/[0.05]" onClick={() => handleSort("expiresAt")}>
+                        <div className="flex items-center gap-1">
+                          Expiry
+                          {sortConfig.sortBy === "expiresAt" && (
+                            <ChevronUp className={`h-3.5 w-3.5 transition-transform ${sortConfig.sortOrder === "desc" ? "rotate-180" : ""}`} />
+                          )}
+                        </div>
+                      </th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="py-12 text-center text-slate-400">
+                          <div className="flex flex-col items-center gap-2">
+                            <Search className="h-8 w-8 opacity-50" />
+                            <p>No users found</p>
+                            {filters.search || filters.enabled !== undefined || filters.userType || filters.isTesting ? (
+                              <button
+                                onClick={handleResetFilters}
+                                className="mt-2 text-sm text-sky-400 hover:text-sky-300"
+                              >
+                                Clear filters
+                              </button>
+                            ) : null}
                           </div>
                         </td>
                       </tr>
-                    );
-                  })}
-                </tbody>
+                    ) : (
+                      users.map((user) => {
+                        const summary = deriveUserSummary(user);
+
+                        return (
+                          <tr key={user.id} className="bg-transparent">
+                            <td>
+                              <div className="min-w-[180px]">
+                                <p className="font-semibold text-white">{user.email}</p>
+                                <div className="mt-1 flex flex-wrap gap-1.5">
+                                  {user.isTesting ? (
+                                    <span className="status-pill text-[10px] text-amber-200">
+                                      <span className="h-2 w-2 rounded-full bg-amber-300" />
+                                      testing
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <p className="mt-1 text-xs text-slate-500">{user.notes || "No notes"}</p>
+                              </div>
+                            </td>
+                            <td className="font-mono text-xs text-slate-400">{user.uuid}</td>
+                            <td>
+                              <span className={`status-pill ${user.enabled ? "text-emerald-300" : "text-slate-400"}`}>
+                                <span className={`h-2 w-2 rounded-full ${user.enabled ? "bg-emerald-400" : "bg-slate-500"}`} />
+                                {user.enabled ? "enabled" : "disabled"}
+                              </span>
+                            </td>
+                            <td>
+                              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] ${
+                                user.userType === "light"
+                                  ? "bg-emerald-500/10 text-emerald-200"
+                                  : user.userType === "medium"
+                                    ? "bg-amber-500/10 text-amber-200"
+                                    : user.userType === "moderate"
+                                      ? "bg-rose-500/10 text-rose-200"
+                                      : "bg-slate-500/10 text-slate-200"
+                              }`}>
+                                <span className={`h-1.5 w-1.5 rounded-full ${
+                                  user.userType === "light"
+                                    ? "bg-emerald-400"
+                                    : user.userType === "medium"
+                                      ? "bg-amber-400"
+                                      : user.userType === "moderate"
+                                        ? "bg-rose-400"
+                                        : "bg-slate-400"
+                                }`} />
+                                {user.userType ?? "unknown"}
+                              </span>
+                            </td>
+                            <td className="min-w-[220px]">
+                              <BandwidthUsage usedBytes={user.bandwidthUsedBytes} limitGb={summary.bandwidthLimitGb} showDetails={false} />
+                              <p className="mt-2 text-xs text-slate-500">{(user.bandwidthAllocations ?? []).length} bandwidth entries</p>
+                            </td>
+                            <td className="text-sm font-semibold text-emerald-300">{summary.tokenBalance.toFixed(2)}</td>
+                            <td className="text-sm text-slate-400">{formatDate(summary.expiresAt)}</td>
+                            <td className="min-w-[150px]">
+                              <div className="grid grid-cols-3 gap-1.5">
+                                <button
+                                  onClick={() => void openAccess(user)}
+                                  className="btn-primary justify-center px-0 py-2 text-xs"
+                                  title="QR"
+                                  aria-label={`Open QR for ${user.email}`}
+                                >
+                                  <QrCode className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => startEdit(user)}
+                                  className="btn-secondary justify-center px-0 py-2 text-xs"
+                                  title="Edit"
+                                  aria-label={`Edit ${user.email}`}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => setDeleteTarget(user)}
+                                  className="btn-danger justify-center px-0 py-2 text-xs"
+                                  title="Delete"
+                                  aria-label={`Delete ${user.email}`}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
               </table>
             </div>
-          </div>
+          )}
 
-          <div className="min-w-0 grid gap-2.5 lg:hidden">
-            {users.map((user) => {
-              const summary = deriveUserSummary(user);
+          {/* Mobile view */}
+          {!loading && (
+            <div className="min-w-0 grid gap-3 lg:hidden">
+              {users.map((user) => {
+                const summary = deriveUserSummary(user);
 
-              return (
-                <article key={user.id} className="panel-subtle min-w-0 overflow-hidden px-3 py-3.5">
-                  <div className="min-w-0 flex flex-col gap-2.5">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0">
-                        <p className="break-words text-[15px] font-semibold leading-5 text-white">{user.email}</p>
-                        <div className="mt-1 flex flex-wrap gap-1.5">
-                          {user.isTesting ? (
-                            <span className="status-pill w-fit max-w-full shrink-0 px-2 py-1 text-[10px] text-amber-200">
-                              <span className="h-2 w-2 rounded-full bg-amber-300" />
-                              testing
+                return (
+                  <article key={user.id} className="panel-subtle min-w-0 overflow-hidden p-3 sm:p-4">
+                    <div className="min-w-0 flex flex-col gap-3">
+                      {/* Header: Email, UUID, Status */}
+                      <div className="flex flex-col gap-2">
+                        <div className="min-w-0">
+                          <p className="break-words text-[15px] font-semibold leading-5 text-white">{user.email}</p>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                            {user.isTesting ? (
+                              <span className="status-pill w-fit max-w-full shrink-0 px-2 py-1 text-[10px] text-amber-200">
+                                <span className="h-2 w-2 rounded-full bg-amber-300" />
+                                testing
+                              </span>
+                            ) : null}
+                            <span className={`status-pill w-fit max-w-full shrink-0 px-2.5 py-1 text-[10px] ${user.enabled ? "text-emerald-300" : "text-slate-400"}`}>
+                              <span className={`h-2 w-2 rounded-full ${user.enabled ? "bg-emerald-400" : "bg-slate-500"}`} />
+                              {user.enabled ? "enabled" : "disabled"}
                             </span>
-                          ) : null}
+                          </div>
+                          <p className="mt-1.5 break-all font-mono text-[11px] leading-4 text-slate-500">{user.uuid}</p>
                         </div>
-                        <p className="mt-1 break-all font-mono text-[11px] leading-4 text-slate-500">{user.uuid}</p>
                       </div>
-                      <span className={`status-pill w-fit max-w-full shrink-0 self-start px-2.5 py-1 text-[10px] ${user.enabled ? "text-emerald-300" : "text-slate-400"}`}>
-                        <span className={`h-2 w-2 rounded-full ${user.enabled ? "bg-emerald-400" : "bg-slate-500"}`} />
-                        {user.enabled ? "enabled" : "disabled"}
-                      </span>
+
+                      {/* Bandwidth Usage */}
+                      <BandwidthUsage usedBytes={user.bandwidthUsedBytes} limitGb={summary.bandwidthLimitGb} showDetails={false} />
+
+                      {/* Stats Grid */}
+                      <div className="grid grid-cols-2 gap-2 text-xs text-slate-400">
+                        <div className="panel-subtle min-w-0 rounded-xl px-3 py-2.5">
+                          <p className="metric-kicker">Notes</p>
+                          <p className="mt-1.5 line-clamp-2 break-words text-sm text-slate-300">{user.notes || "No notes"}</p>
+                        </div>
+                        <div className="panel-subtle min-w-0 rounded-xl px-3 py-2.5">
+                          <p className="metric-kicker">Expiry</p>
+                          <p className="mt-1.5 break-words text-sm text-slate-300">{formatDate(summary.expiresAt)}</p>
+                        </div>
+                        <div className="panel-subtle min-w-0 rounded-xl px-3 py-2.5">
+                          <p className="metric-kicker">Credit Balance</p>
+                          <p className="mt-1.5 text-sm text-emerald-300">{summary.tokenBalance.toFixed(2)}</p>
+                        </div>
+                        <div className="panel-subtle min-w-0 rounded-xl px-3 py-2.5">
+                          <p className="metric-kicker">Entries</p>
+                          <p className="mt-1.5 text-sm text-slate-300">{(user.bandwidthAllocations ?? []).length}</p>
+                        </div>
+                      </div>
+
+                      {/* Bandwidth List */}
+                      {(user.bandwidthAllocations ?? []).length > 0 && (
+                        <div className="panel-subtle min-w-0 rounded-xl px-3 py-2.5">
+                          <p className="metric-kicker">Bandwidth List</p>
+                          <div className="mt-2 min-w-0 space-y-1.5">
+                            {(user.bandwidthAllocations ?? []).map((allocation) => (
+                              <AllocationSummary key={allocation.id} allocation={allocation} />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Action Buttons */}
+                      <div className="grid grid-cols-3 gap-2">
+                        <button onClick={() => startEdit(user)} className="btn-secondary w-full justify-center px-0 py-2 text-xs">
+                          Edit
+                        </button>
+                        <button onClick={() => void openAccess(user)} className="btn-primary w-full justify-center gap-1.5 px-0 py-2 text-xs">
+                          <QrCode className="h-3.5 w-3.5" />
+                          QR
+                        </button>
+                        <button onClick={() => setDeleteTarget(user)} className="btn-danger w-full justify-center px-0 py-2 text-xs">
+                          Delete
+                        </button>
+                      </div>
                     </div>
-                    <BandwidthUsage usedBytes={user.bandwidthUsedBytes} limitGb={summary.bandwidthLimitGb} showDetails={false} />
-                    <div className="grid gap-2 text-xs text-slate-400 grid-cols-2">
-                      <div className="panel-subtle min-w-0 px-3 py-2.5">
-                        <p className="metric-kicker">Notes</p>
-                        <p className="mt-1.5 line-clamp-2 break-words text-sm text-slate-300">{user.notes || "No notes"}</p>
-                      </div>
-                      <div className="panel-subtle min-w-0 px-3 py-2.5">
-                        <p className="metric-kicker">Expiry</p>
-                        <p className="mt-1.5 break-words text-sm text-slate-300">{formatDate(summary.expiresAt)}</p>
-                      </div>
-                      <div className="panel-subtle min-w-0 px-3 py-2.5">
-                        <p className="metric-kicker">Credit Balance</p>
-                        <p className="mt-1.5 text-sm text-emerald-300">{summary.tokenBalance.toFixed(2)}</p>
-                      </div>
-                      <div className="panel-subtle min-w-0 px-3 py-2.5">
-                        <p className="metric-kicker">Bandwidth Entries</p>
-                        <p className="mt-1.5 text-sm text-slate-300">{(user.bandwidthAllocations ?? []).length}</p>
-                      </div>
-                    </div>
-                    <div className="panel-subtle min-w-0 px-3 py-2.5">
-                      <p className="metric-kicker">Bandwidth List</p>
-                      <div className="mt-2 min-w-0 space-y-1.5">
-                        {(user.bandwidthAllocations ?? []).length ? (user.bandwidthAllocations ?? []).map((allocation) => (
-                          <AllocationSummary key={allocation.id} allocation={allocation} />
-                        )) : (
-                          <p className="text-sm text-slate-500">No bandwidth entries yet.</p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      <button onClick={() => startEdit(user)} className="btn-secondary w-full justify-center px-0 py-2 text-xs">
-                        Edit
-                      </button>
-                      <button onClick={() => void openAccess(user)} className="btn-primary w-full justify-center gap-1.5 px-0 py-2 text-xs">
-                        <QrCode className="h-3.5 w-3.5" />
-                        QR
-                      </button>
-                      <button onClick={() => setDeleteTarget(user)} className="btn-danger w-full justify-center px-0 py-2 text-xs">
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Pagination */}
+          {!loading && users.length > 0 && (
+            <Pagination
+              meta={pagination}
+              onPageChange={handlePageChange}
+              onPageSizeChange={handlePageSizeChange}
+            />
+          )}
         </div>
       </SectionCard>
 

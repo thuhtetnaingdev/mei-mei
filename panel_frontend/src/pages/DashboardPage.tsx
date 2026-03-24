@@ -3,23 +3,25 @@ import { useEffect, useState } from "react";
 import api from "../api/client";
 import { SectionCard } from "../components/SectionCard";
 import { StatCard } from "../components/StatCard";
-import type { DashboardStats, Node, User } from "../types";
+import type { DashboardStats, Node, UserStats } from "../types";
 
 export function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats>({ users: 0, activeUsers: 0, nodes: 0, onlineNodes: 0 });
-  const [users, setUsers] = useState<User[]>([]);
   const [nodes, setNodes] = useState<Node[]>([]);
 
   useEffect(() => {
-    void Promise.all([api.get<User[]>("/users"), api.get<Node[]>("/nodes")])
-      .then(([usersRes, nodesRes]) => {
-        const nextUsers = usersRes.data;
+    void Promise.all([
+      // Use lightweight stats endpoint instead of fetching all users
+      api.get<UserStats>("/users/stats"),
+      api.get<Node[]>("/nodes")
+    ])
+      .then(([statsRes, nodesRes]) => {
+        const userStats = statsRes.data;
         const nextNodes = nodesRes.data;
-        setUsers(nextUsers);
         setNodes(nextNodes);
         setStats({
-          users: nextUsers.length,
-          activeUsers: nextUsers.filter((user) => user.enabled).length,
+          users: userStats.totalUsers,
+          activeUsers: userStats.enabledUsers,
           nodes: nextNodes.length,
           onlineNodes: nextNodes.filter((node) => node.healthStatus === "online").length
         });
@@ -29,7 +31,6 @@ export function DashboardPage() {
 
   const offlineNodes = stats.nodes - stats.onlineNodes;
   const disabledUsers = stats.users - stats.activeUsers;
-  const latestUsers = [...users].sort((a, b) => b.id - a.id).slice(0, 4);
   const latestNodes = [...nodes].sort((a, b) => b.id - a.id).slice(0, 4);
 
   return (
@@ -113,24 +114,11 @@ export function DashboardPage() {
           title="Newest identities"
           description="Freshly created VPN users stay visible here so you can quickly confirm provisioning before sharing access links."
         >
-          <div className="space-y-3">
-            {latestUsers.length ? latestUsers.map((user) => (
-              <div key={user.id} className="panel-subtle flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-white">{user.email}</p>
-                  <p className="mt-1 truncate font-mono text-xs text-slate-500">{user.uuid}</p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className={`status-pill ${user.enabled ? "text-emerald-300" : "text-slate-400"}`}>
-                    <span className={`h-2 w-2 rounded-full ${user.enabled ? "bg-emerald-400" : "bg-slate-500"}`} />
-                    {user.enabled ? "enabled" : "disabled"}
-                  </span>
-                  <ArrowUpRight className="h-4 w-4 text-slate-500" />
-                </div>
-              </div>
-            )) : (
-              <div className="panel-subtle p-4 text-sm text-slate-400">No users found yet.</div>
-            )}
+          <div className="panel-subtle p-4 text-sm text-slate-400">
+            <p>User list available on the</p>
+            <a href="/users" className="mt-1 inline-block text-sm text-sky-400 hover:text-sky-300 hover:underline">
+              Users page →
+            </a>
           </div>
         </SectionCard>
 

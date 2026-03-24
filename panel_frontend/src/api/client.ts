@@ -1,6 +1,7 @@
 import axios from "axios";
 import type { InternalAxiosRequestConfig } from "axios";
 import { notifySessionExpired } from "../auth";
+import type { UserListOptions, UserListResult } from "../types";
 
 type CompatAxiosRequestConfig = InternalAxiosRequestConfig & {
   _legacyRetryWithoutApiPrefix?: boolean;
@@ -71,5 +72,10 @@ api.interceptors.response.use(
     return api.request(config);
   }
 );
+
+export const listUsers = async (params: UserListOptions): Promise<UserListResult> => {
+  const response = await api.get<UserListResult>("/users", { params });
+  return response.data;
+};
 
 export default api;
