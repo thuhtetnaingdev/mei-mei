@@ -118,6 +118,12 @@ func (s *ConfigService) Apply(req ApplyConfigRequest) error {
 		req.RealitySNIs,
 		req.Hysteria2Masquerades,
 		users,
+		s.cfg.DNSServers,
+		s.cfg.DNSStrategy,
+		s.cfg.DNSDisableCache,
+		s.cfg.DNSDisableExpire,
+		s.cfg.DNSIndependentCache,
+		s.cfg.DNSReverseMapping,
 	)
 	if err != nil {
 		s.setError(err.Error())
@@ -304,6 +310,12 @@ func (s *ConfigService) buildV2RayAPIFallbackPayload(req ApplyConfigRequest, use
 		req.RealitySNIs,
 		req.Hysteria2Masquerades,
 		users,
+		s.cfg.DNSServers,
+		s.cfg.DNSStrategy,
+		s.cfg.DNSDisableCache,
+		s.cfg.DNSDisableExpire,
+		s.cfg.DNSIndependentCache,
+		s.cfg.DNSReverseMapping,
 	)
 }
 

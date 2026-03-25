@@ -1,7 +1,9 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -70,7 +72,107 @@ func RateLimiterMiddleware() gin.HandlerFunc {
 	}
 }
 
+// LoginRateLimiterMiddleware creates a rate limiting middleware specifically for login endpoints
+// It limits login attempts to prevent brute force attacks (OWASP A07)
+// Limit: 5 attempts per minute per IP address using sliding window
+func LoginRateLimiterMiddleware() gin.HandlerFunc {
+	type loginAttempt struct {
+		timestamp time.Time
+		count     int
+	}
+
+	var (
+		attempts = make(map[string]*loginAttempt)
+		mu       sync.RWMutex
+	)
+
+	// Cleanup old entries every 30 seconds
+	go func() {
+		for {
+			time.Sleep(30 * time.Second)
+			mu.Lock()
+			for ip, attempt := range attempts {
+				if time.Since(attempt.timestamp) > 2*time.Minute {
+					delete(attempts, ip)
+				}
+			}
+			mu.Unlock()
+		}
+	}()
+
+	return func(c *gin.Context) {
+		ip := getClientIP(c)
+		now := time.Now()
+
+		mu.Lock()
+		attempt, exists := attempts[ip]
+		
+		if !exists || now.Sub(attempt.timestamp) > time.Minute {
+			// Reset counter if more than a minute has passed
+			attempts[ip] = &loginAttempt{
+				timestamp: now,
+				count:     1,
+			}
+			mu.Unlock()
+			c.Next()
+			return
+		}
+
+		if attempt.count >= 5 {
+			// Rate limit exceeded
+			retryAfter := int(60 - now.Sub(attempt.timestamp).Seconds())
+			if retryAfter < 1 {
+				retryAfter = 1
+			}
+
+			c.Header("Retry-After", fmt.Sprintf("%d", retryAfter))
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"error":       "too many login attempts, please try again later",
+				"retry_after": retryAfter,
+			})
+			c.Abort()
+			mu.Unlock()
+			return
+		}
+
+		attempt.count++
+		mu.Unlock()
+		c.Next()
+	}
+}
+
+// getClientIP extracts the client IP address from the request,
+// considering X-Forwarded-For header for proxied requests
+func getClientIP(c *gin.Context) string {
+	// Check X-Forwarded-For header first (for proxied requests)
+	xff := c.GetHeader("X-Forwarded-For")
+	if xff != "" {
+		// X-Forwarded-For can contain multiple IPs, take the first one
+		ips := strings.Split(xff, ",")
+		if len(ips) > 0 {
+			ip := strings.TrimSpace(ips[0])
+			if ip != "" {
+				return ip
+			}
+		}
+	}
+
+	// Check X-Real-IP header
+	xri := c.GetHeader("X-Real-IP")
+	if xri != "" {
+		return xri
+	}
+
+	// Fall back to ClientIP() which checks RemoteAddr
+	return c.ClientIP()
+}
+
 type clientLimiter struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
+type loginClientLimiter struct {
 	limiter  *rate.Limiter
 	lastSeen time.Time
 }

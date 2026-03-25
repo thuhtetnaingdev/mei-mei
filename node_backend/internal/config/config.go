@@ -28,6 +28,12 @@ type Config struct {
 	TLSCertificatePath          string
 	TLSKeyPath                  string
 	TLSServerName               string
+	DNSServers                  string
+	DNSStrategy                 string
+	DNSDisableCache             bool
+	DNSDisableExpire            bool
+	DNSIndependentCache         bool
+	DNSReverseMapping           bool
 }
 
 func Load() Config {
@@ -53,6 +59,12 @@ func Load() Config {
 		TLSCertificatePath:          getEnv("TLS_CERTIFICATE_PATH", "/opt/meimei-node/tls.crt"),
 		TLSKeyPath:                  getEnv("TLS_KEY_PATH", "/opt/meimei-node/tls.key"),
 		TLSServerName:               getEnv("TLS_SERVER_NAME", getEnv("PUBLIC_HOST", "node.example.com")),
+		DNSServers:                  getEnv("DNS_SERVERS", "8.8.8.8,1.1.1.1"),
+		DNSStrategy:                 getEnv("DNS_STRATEGY", "prefer_ipv4"),
+		DNSDisableCache:             getEnvAsBool("DNS_DISABLE_CACHE", false),
+		DNSDisableExpire:            getEnvAsBool("DNS_DISABLE_EXPIRE", false),
+		DNSIndependentCache:         getEnvAsBool("DNS_INDEPENDENT_CACHE", false),
+		DNSReverseMapping:           getEnvAsBool("DNS_REVERSE_MAPPING", false),
 	}
 }
 
@@ -82,4 +94,16 @@ func getEnvAsInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func getEnvAsBool(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	b, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return b
 }

@@ -78,7 +78,7 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	router.POST("/auth/login", handler.login)
+	router.POST("/auth/login", LoginRateLimiterMiddleware(), handler.login)
 	router.GET("/subscription/:userId", handler.getSubscription)
 	router.GET("/profiles/singbox/:uuid", handler.getSingboxProfile)
 

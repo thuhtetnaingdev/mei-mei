@@ -1,6 +1,11 @@
 package singbox
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+)
 
 type User struct {
 	ID               uint   `json:"id"`
@@ -16,9 +21,19 @@ type Config struct {
 	Inbounds     []map[string]interface{} `json:"inbounds"`
 	Outbounds    []map[string]interface{} `json:"outbounds"`
 	Route        map[string]interface{}   `json:"route"`
+	DNS          map[string]interface{}   `json:"dns,omitempty"`
 }
 
-func Generate(nodeName, publicHost string, realityPrivateKey, realityServerName, realityShortID, handshakeServer string, handshakePort int, tlsCertPath, tlsKeyPath, tlsServerName, v2rayAPIListen string, realitySNIs, hysteria2Masquerades []string, users []User) ([]byte, error) {
+func Generate(
+	nodeName, publicHost string,
+	realityPrivateKey, realityServerName, realityShortID, handshakeServer string,
+	handshakePort int,
+	tlsCertPath, tlsKeyPath, tlsServerName, v2rayAPIListen string,
+	realitySNIs, hysteria2Masquerades []string,
+	users []User,
+	dnsServers, dnsStrategy string,
+	dnsDisableCache, dnsDisableExpire, dnsIndependentCache, dnsReverseMapping bool,
+) ([]byte, error) {
 	vlessClients := make([]map[string]interface{}, 0, len(users))
 	tuicClients := make([]map[string]interface{}, 0, len(users))
 	hy2Clients := make([]map[string]interface{}, 0, len(users))
@@ -158,6 +173,7 @@ func Generate(nodeName, publicHost string, realityPrivateKey, realityServerName,
 			"final":                 "direct",
 			"auto_detect_interface": true,
 		},
+		DNS: buildDNSConfig(dnsServers, dnsStrategy, dnsDisableCache, dnsDisableExpire, dnsIndependentCache, dnsReverseMapping),
 	}
 	if v2rayAPIListen != "" {
 		cfg.Experimental = map[string]interface{}{
@@ -175,4 +191,134 @@ func Generate(nodeName, publicHost string, realityPrivateKey, realityServerName,
 	_ = publicHost
 
 	return json.MarshalIndent(cfg, "", "  ")
+}
+
+func buildDNSConfig(servers string, strategy string, disableCache, disableExpire, independentCache, reverseMapping bool) map[string]interface{} {
+	if strings.TrimSpace(servers) == "" {
+		return nil
+	}
+
+	serverList := strings.Split(servers, ",")
+	dnsServers := make([]map[string]interface{}, 0, len(serverList))
+
+	for i, srv := range serverList {
+		srv = strings.TrimSpace(srv)
+		if srv == "" {
+			continue
+		}
+
+		tag := fmt.Sprintf("dns%d", i+1)
+		dnsServers = append(dnsServers, map[string]interface{}{
+			"tag":         tag,
+			"type":        "udp",
+			"server":      srv,
+			"server_port": 53,
+		})
+	}
+
+	if len(dnsServers) == 0 {
+		return nil
+	}
+
+	dns := map[string]interface{}{
+		"servers": dnsServers,
+		"final":   "dns1",
+	}
+
+	if strategy != "" {
+		dns["strategy"] = strategy
+	}
+	if disableCache {
+		dns["disable_cache"] = true
+	}
+	if disableExpire {
+		dns["disable_expire"] = true
+	}
+	if independentCache {
+		dns["independent_cache"] = true
+	}
+	if reverseMapping {
+		dns["reverse_mapping"] = true
+	}
+
+	return dns
+}
+
+func parseDNSServerAddress(address string, index int) map[string]interface{} {
+	address = strings.TrimSpace(address)
+	tag := fmt.Sprintf("dns%d", index)
+
+	if strings.HasPrefix(address, "tcp://") {
+		return map[string]interface{}{
+			"tag":     tag,
+			"type":    "tcp",
+			"address": address,
+		}
+	}
+
+	if strings.HasPrefix(address, "tls://") {
+		return map[string]interface{}{
+			"tag":     tag,
+			"type":    "tls",
+			"address": address,
+		}
+	}
+
+	if strings.HasPrefix(address, "https://") || strings.HasPrefix(address, "h3://") {
+		return map[string]interface{}{
+			"tag":     tag,
+			"type":    "https",
+			"address": address,
+		}
+	}
+
+	if strings.HasPrefix(address, "quic://") {
+		return map[string]interface{}{
+			"tag":     tag,
+			"type":    "quic",
+			"address": address,
+		}
+	}
+
+	if strings.HasPrefix(address, "udp://") {
+		address = strings.TrimPrefix(address, "udp://")
+	}
+
+	host, portStr, err := splitHostPort(address)
+	if err != nil {
+		return map[string]interface{}{
+			"tag":    tag,
+			"type":   "udp",
+			"server": address,
+			"port":   53,
+		}
+	}
+
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		port = 53
+	}
+
+	return map[string]interface{}{
+		"tag":    tag,
+		"type":   "udp",
+		"server": host,
+		"port":   port,
+	}
+}
+
+func splitHostPort(address string) (string, string, error) {
+	lastColon := strings.LastIndex(address, ":")
+	if lastColon < 0 {
+		return address, "53", nil
+	}
+
+	host := address[:lastColon]
+	port := address[lastColon+1:]
+
+	if port == "" {
+		return host, "53", nil
+	}
+
+	return host, port, nil
 }

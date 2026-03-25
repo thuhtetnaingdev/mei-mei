@@ -485,6 +485,13 @@ VLESS_REALITY_HANDSHAKE_PORT=${reality_handshake_port}
 TLS_CERTIFICATE_PATH=${INSTALL_DIR}/tls.crt
 TLS_KEY_PATH=${INSTALL_DIR}/tls.key
 TLS_SERVER_NAME=${tls_server_name}
+# DNS Configuration
+DNS_SERVERS=8.8.8.8,1.1.1.1
+DNS_STRATEGY=prefer_ipv4
+DNS_DISABLE_CACHE=false
+DNS_DISABLE_EXPIRE=false
+DNS_INDEPENDENT_CACHE=false
+DNS_REVERSE_MAPPING=false
 EOF
 
 sudo tee /etc/systemd/system/meimei-node.service >/dev/null <<EOF

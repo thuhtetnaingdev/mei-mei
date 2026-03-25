@@ -25,6 +25,12 @@ func TestGenerateBuildsMultiUserShadowsocksInbound(t *testing.T) {
 			{ID: 2, UUID: "user-2", Email: "two@example.com", Enabled: true},
 			{ID: 3, UUID: "user-3", Email: "three@example.com", Enabled: false},
 		},
+		"8.8.8.8,1.1.1.1",
+		"prefer_ipv4",
+		false,
+		false,
+		false,
+		false,
 	)
 	if err != nil {
 		t.Fatalf("Generate() error = %v", err)
@@ -80,4 +86,76 @@ func TestGenerateBuildsMultiUserShadowsocksInbound(t *testing.T) {
 			t.Fatalf("unexpected shadowsocks user entry: %#v", entry)
 		}
 	}
+}
+
+func TestBuildDNSConfig(t *testing.T) {
+	t.Run("returns nil for empty servers", func(t *testing.T) {
+		result := buildDNSConfig("", "prefer_ipv4", false, false, false, false)
+		if result != nil {
+			t.Fatalf("expected nil for empty servers, got %#v", result)
+		}
+	})
+
+	t.Run("builds basic DNS config", func(t *testing.T) {
+		result := buildDNSConfig("8.8.8.8,1.1.1.1", "prefer_ipv4", false, false, false, false)
+		if result == nil {
+			t.Fatal("expected non-nil result")
+		}
+
+		servers, ok := result["servers"].([]map[string]interface{})
+		if !ok {
+			t.Fatalf("expected servers to be []map[string]interface{}, got %#v", result["servers"])
+		}
+
+		if len(servers) != 2 {
+			t.Fatalf("expected 2 DNS servers, got %d", len(servers))
+		}
+
+		if servers[0]["tag"] != "dns1" || servers[0]["server"] != "8.8.8.8" {
+			t.Fatalf("unexpected first server: %#v", servers[0])
+		}
+
+		if servers[1]["tag"] != "dns2" || servers[1]["server"] != "1.1.1.1" {
+			t.Fatalf("unexpected second server: %#v", servers[1])
+		}
+
+		if result["strategy"] != "prefer_ipv4" {
+			t.Fatalf("unexpected strategy: %#v", result["strategy"])
+		}
+
+		if result["final"] != "dns1" {
+			t.Fatalf("unexpected final: %#v", result["final"])
+		}
+	})
+
+	t.Run("builds config with cache disabled", func(t *testing.T) {
+		result := buildDNSConfig("8.8.8.8", "", true, true, true, false)
+		if result == nil {
+			t.Fatal("expected non-nil result")
+		}
+
+		if result["disable_cache"] != true {
+			t.Fatalf("expected disable_cache to be true")
+		}
+
+		if result["disable_expire"] != true {
+			t.Fatalf("expected disable_expire to be true")
+		}
+
+		if result["independent_cache"] != true {
+			t.Fatalf("expected independent_cache to be true")
+		}
+	})
+
+	t.Run("handles whitespace in server list", func(t *testing.T) {
+		result := buildDNSConfig(" 8.8.8.8 , 1.1.1.1 ", "", false, false, false, false)
+		if result == nil {
+			t.Fatal("expected non-nil result")
+		}
+
+		servers, ok := result["servers"].([]map[string]interface{})
+		if !ok || len(servers) != 2 {
+			t.Fatalf("expected 2 DNS servers, got %#v", result["servers"])
+		}
+	})
 }
