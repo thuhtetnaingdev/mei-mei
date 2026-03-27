@@ -65,7 +65,8 @@ func GenerateNodeLinks(user models.User, nodes []models.Node, settings services.
 				vlessQuery.Set("security", "reality")
 				vlessQuery.Set("flow", "xtls-rprx-vision")
 				vlessQuery.Set("sni", variant.ServerName)
-				vlessQuery.Set("pbk", node.RealityPublicKey)
+				// Convert standard base64 to base64url for subscription link (pbk parameter)
+				vlessQuery.Set("pbk", toBase64URL(node.RealityPublicKey))
 				vlessQuery.Set("sid", node.RealityShortID)
 				vlessQuery.Set("fp", randomizedUTLSFingerprint)
 			}
@@ -138,4 +139,14 @@ func valueOrDefault(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+// toBase64URL ensures the key is in base64url format without padding
+// Keys are already stored in base64url format, but we ensure no padding is present
+// sing-box expects base64url encoding WITHOUT padding (43 characters for 32-byte key)
+func toBase64URL(s string) string {
+	s = strings.ReplaceAll(s, "+", "-")
+	s = strings.ReplaceAll(s, "/", "_")
+	s = strings.TrimRight(s, "=")
+	return s
 }

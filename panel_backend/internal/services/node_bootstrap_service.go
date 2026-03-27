@@ -453,7 +453,8 @@ func generateRealityKeypair() (string, string, error) {
 		return "", "", err
 	}
 
-	return base64.RawURLEncoding.EncodeToString(privateKey[:]), base64.RawURLEncoding.EncodeToString(publicKey), nil
+	// Use standard base64 encoding (compatible with sing-box)
+	return base64.StdEncoding.EncodeToString(privateKey[:]), base64.StdEncoding.EncodeToString(publicKey), nil
 }
 
 func generateRealityShortID() (string, error) {

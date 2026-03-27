@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"io"
 	"log"
 	"net/http"
@@ -80,12 +79,14 @@ func NewRouterWithConfigService(cfg config.Config, configService *services.Confi
 				return
 			}
 
-			if err := configService.Apply(req); err != nil {
+			// Use debounced apply for better resource efficiency
+			// Multiple rapid config changes will be coalesced into a single apply
+			if err := configService.ApplyDebounced(req); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
 
-			c.JSON(http.StatusOK, gin.H{"status": "applied"})
+			c.JSON(http.StatusOK, gin.H{"status": "config applied (debounced)"})
 		})
 
 		protected.POST("/reinstall", func(c *gin.Context) {
@@ -134,14 +135,89 @@ func NewRouterWithConfigService(cfg config.Config, configService *services.Confi
 			c.JSON(http.StatusAccepted, result)
 		})
 
+		protected.POST("/update-reality-keys", func(c *gin.Context) {
+			var req struct {
+				PrivateKey string `json:"privateKey"`
+				PublicKey  string `json:"publicKey"`
+				ShortID    string `json:"shortId"`
+			}
+
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+				return
+			}
+
+			// Validate required fields
+			if req.PrivateKey == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "privateKey is required"})
+				return
+			}
+			if req.PublicKey == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "publicKey is required"})
+				return
+			}
+			if req.ShortID == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "shortId is required"})
+				return
+			}
+
+			if err := configService.UpdateRealityKeys(req.PrivateKey, req.PublicKey, req.ShortID); err != nil {
+				log.Printf("[update-reality-keys] failed: %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"message": "reality keys updated successfully",
+			})
+		})
+
 		protected.GET("/speed-test/download", func(c *gin.Context) {
+			// Parse size parameter with validation
 			size := parseSpeedTestSize(c.Query("bytes"), 1024*1024, 256*1024, 2*1024*1024)
-			payload := bytes.Repeat([]byte("MEIMEI_SPEED_TEST_"), (size/18)+1)
+
+			// Set headers for streaming
 			c.Header("Content-Type", "application/octet-stream")
 			c.Header("Cache-Control", "no-store")
-			c.Header("Content-Length", strconv.Itoa(size))
+			c.Header("X-Content-Type-Options", "nosniff")
+
+			// Stream in chunks instead of allocating full buffer
+			pattern := []byte("MEIMEI_SPEED_TEST_")
+			chunkSize := 8192 // 8KB chunks
+			chunk := make([]byte, chunkSize)
+			remaining := size
+
+			// Flush headers immediately
 			c.Status(http.StatusOK)
-			_, _ = c.Writer.Write(payload[:size])
+			w := c.Writer
+
+			for remaining > 0 {
+				n := chunkSize
+				if remaining < n {
+					n = remaining
+				}
+
+				// Fill chunk with pattern
+				for i := 0; i < n; i++ {
+					chunk[i] = pattern[i%len(pattern)]
+				}
+
+				// Write chunk
+				if _, err := w.Write(chunk[:n]); err != nil {
+					log.Printf("[speed-test] write error: %v", err)
+					return
+				}
+
+				remaining -= n
+
+				// Flush to client
+				if flusher, ok := w.(http.Flusher); ok {
+					flusher.Flush()
+				}
+			}
+
+			log.Printf("[speed-test] completed streaming %d bytes", size)
 		})
 
 		protected.POST("/speed-test/upload", func(c *gin.Context) {

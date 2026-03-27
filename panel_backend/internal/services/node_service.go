@@ -705,11 +705,12 @@ func (s *NodeService) refreshNodeRuntimeStatus(node *models.Node) {
 	now := time.Now()
 	node.HealthStatus = "online"
 	node.LastHeartbeat = &now
-	node.BandwidthUsedBytes = status.BandwidthUsedBytes
+	// Note: Do NOT update bandwidth_used_bytes from node status.
+	// The panel is the source of truth for cumulative bandwidth.
+	// Node bandwidth should only be updated via bandwidth collection (delta-based).
 	updates := map[string]interface{}{
 		"health_status":            "online",
 		"last_heartbeat":           &now,
-		"bandwidth_used_bytes":     status.BandwidthUsedBytes,
 		"last_applied_config_hash": status.LastAppliedConfigHash,
 		"applied_user_count":       status.AppliedUserCount,
 		"last_config_applied_at":   status.SyncVerificationAt,

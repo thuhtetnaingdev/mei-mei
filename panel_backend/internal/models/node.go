@@ -24,6 +24,7 @@ type Node struct {
 	RealityPublicKey       string     `json:"realityPublicKey"`
 	RealityShortID         string     `json:"realityShortId"`
 	RealityServerName      string     `json:"realityServerName"`
+	RealityPrivateKeyHash  string     `json:"realityPrivateKeyHash" gorm:"type:varchar(64)"`
 	ProtocolToken          string     `json:"-" gorm:"not null"`
 	Enabled                bool       `json:"enabled" gorm:"default:true"`
 	IsTestable             bool       `json:"isTestable" gorm:"default:false"`
@@ -36,6 +37,9 @@ type Node struct {
 	LastConfigAppliedAt    *time.Time `json:"lastConfigAppliedAt"`
 	LastHeartbeat          *time.Time `json:"lastHeartbeat"`
 	LastSyncAt             *time.Time `json:"lastSyncAt"`
+	LastKeyVerificationAt  *time.Time `json:"lastKeyVerificationAt"`
+	KeyMismatchDetectedAt  *time.Time `json:"keyMismatchDetectedAt"`
+	KeyMismatchAutoFixedAt *time.Time `json:"keyMismatchAutoFixedAt"`
 	SingboxVersion         string     `json:"singboxVersion"`
 	CreatedAt              time.Time  `json:"createdAt"`
 	UpdatedAt              time.Time  `json:"updatedAt"`

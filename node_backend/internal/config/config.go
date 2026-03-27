@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -106,4 +107,27 @@ func getEnvAsBool(key string, fallback bool) bool {
 		return fallback
 	}
 	return b
+}
+
+// normalizeRealityPrivateKey converts base64url to standard base64 for sing-box config
+// sing-box Reality expects private_key in standard base64 format
+func normalizeRealityPrivateKey(key string) string {
+	if key == "" {
+		return ""
+	}
+	// Convert base64url to standard base64
+	b64 := strings.ReplaceAll(key, "-", "+")
+	b64 = strings.ReplaceAll(b64, "_", "/")
+	// Add padding if needed
+	if mod := len(b64) % 4; mod == 2 {
+		b64 += "=="
+	} else if mod == 3 {
+		b64 += "="
+	}
+	return b64
+}
+
+// GetRealityPrivateKeyForSingBox returns the private key in standard base64 format for sing-box config
+func (c *Config) GetRealityPrivateKeyForSingBox() string {
+	return normalizeRealityPrivateKey(c.VLESSRealityPrivateKey)
 }

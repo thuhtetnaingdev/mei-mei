@@ -22,17 +22,19 @@ import (
 )
 
 type Handler struct {
-	cfg                         config.Config
-	jwt                         *auth.JWTManager
-	adminService                *services.AdminService
-	userService                 *services.UserService
-	minerService                *services.MinerService
-	nodeService                 *services.NodeService
-	mintPoolService             *services.MintPoolService
-	bandwidthReportService      *services.BandwidthReportService
-	bandwidthCollector          *services.BandwidthCollectorService
-	userClassificationService   *services.UserClassificationService
-	userClassificationScheduler *services.UserClassificationScheduler
+	cfg                            config.Config
+	jwt                            *auth.JWTManager
+	adminService                   *services.AdminService
+	userService                    *services.UserService
+	minerService                   *services.MinerService
+	nodeService                    *services.NodeService
+	mintPoolService                *services.MintPoolService
+	bandwidthReportService         *services.BandwidthReportService
+	bandwidthCollector             *services.BandwidthCollectorService
+	userClassificationService      *services.UserClassificationService
+	userClassificationScheduler    *services.UserClassificationScheduler
+	realityKeyVerificationService  *services.RealityKeyVerificationService
+	realityKeyVerificationScheduler *services.RealityKeyVerificationScheduler
 }
 
 func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
@@ -41,17 +43,19 @@ func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 	bandwidthCollector := services.NewBandwidthCollectorService(services.BandwidthCollectorConfig{
 		DB:              db,
 		NodeSharedToken: cfg.NodeSharedToken,
-		CollectInterval: 10 * time.Second,
+		CollectInterval: 60 * time.Second,
 		RequestTimeout:  30 * time.Second,
 		UserService:     userService,
 		NodeService:     nodeService,
 	})
 	userClassificationService := services.NewUserClassificationService(db)
 	userClassificationScheduler := services.NewUserClassificationScheduler(userClassificationService, 24*time.Hour)
-	return NewRouterWithServices(cfg, db, userService, nodeService, bandwidthCollector, userClassificationService, userClassificationScheduler)
+	realityKeyVerificationService := services.NewRealityKeyVerificationService(db, nodeService, cfg.NodeSharedToken, 30*time.Second)
+	realityKeyVerificationScheduler := services.NewRealityKeyVerificationScheduler(realityKeyVerificationService, 6, true)
+	return NewRouterWithServices(cfg, db, userService, nodeService, bandwidthCollector, userClassificationService, userClassificationScheduler, realityKeyVerificationService, realityKeyVerificationScheduler)
 }
 
-func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services.UserService, nodeService *services.NodeService, bandwidthCollector *services.BandwidthCollectorService, userClassificationService *services.UserClassificationService, userClassificationScheduler *services.UserClassificationScheduler) *gin.Engine {
+func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services.UserService, nodeService *services.NodeService, bandwidthCollector *services.BandwidthCollectorService, userClassificationService *services.UserClassificationService, userClassificationScheduler *services.UserClassificationScheduler, realityKeyVerificationService *services.RealityKeyVerificationService, realityKeyVerificationScheduler *services.RealityKeyVerificationScheduler) *gin.Engine {
 	router := gin.Default()
 	router.Use(cors.New(cors.Config{
 		AllowOrigins: cfg.AllowedOrigins,
@@ -61,17 +65,19 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 	}))
 
 	handler := &Handler{
-		cfg:                         cfg,
-		jwt:                         auth.NewJWTManager(cfg.JWTSecret),
-		adminService:                services.NewAdminService(db, cfg.AdminUsername, cfg.AdminPassword),
-		userService:                 userService,
-		minerService:                services.NewMinerService(db),
-		mintPoolService:             services.NewMintPoolService(db),
-		bandwidthReportService:      services.NewBandwidthReportService(db),
-		nodeService:                 nodeService,
-		bandwidthCollector:          bandwidthCollector,
-		userClassificationService:   userClassificationService,
-		userClassificationScheduler: userClassificationScheduler,
+		cfg:                            cfg,
+		jwt:                            auth.NewJWTManager(cfg.JWTSecret),
+		adminService:                   services.NewAdminService(db, cfg.AdminUsername, cfg.AdminPassword),
+		userService:                    userService,
+		minerService:                   services.NewMinerService(db),
+		mintPoolService:                services.NewMintPoolService(db),
+		bandwidthReportService:         services.NewBandwidthReportService(db),
+		nodeService:                    nodeService,
+		bandwidthCollector:             bandwidthCollector,
+		userClassificationService:      userClassificationService,
+		userClassificationScheduler:    userClassificationScheduler,
+		realityKeyVerificationService:  realityKeyVerificationService,
+		realityKeyVerificationScheduler: realityKeyVerificationScheduler,
 	}
 
 	router.GET("/health", func(c *gin.Context) {
@@ -125,6 +131,11 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 		protected.POST("/nodes/:id/uninstall", handler.uninstallNode)
 		protected.POST("/nodes/:id/reinstall", handler.reinstallNode)
 		protected.POST("/nodes/sync", handler.syncNodes)
+		protected.POST("/nodes/:id/verify-keys", handler.verifyNodeKeys)
+		protected.POST("/nodes/verify-all-keys", handler.verifyAllNodeKeys)
+		protected.POST("/nodes/:id/fix-keys", handler.fixNodeKeys)
+		protected.POST("/nodes/:id/force-rotate-keys", handler.forceRotateKeys)
+		protected.GET("/nodes/:id/key-status", handler.getNodeKeyStatus)
 		protected.POST("/bandwidth/collect", handler.triggerBandwidthCollection)
 		protected.GET("/bandwidth/status", handler.getBandwidthCollectorStatus)
 		protected.POST("/users/classify", handler.triggerUserClassification)
@@ -1072,6 +1083,108 @@ func (h *Handler) getUserClassificationStatus(c *gin.Context) {
 	// Merge the statuses
 	for k, v := range serviceStatus {
 		status[k] = v
+	}
+
+	c.JSON(http.StatusOK, status)
+}
+
+// verifyNodeKeys manually verifies REALITY keys for a single node
+func (h *Handler) verifyNodeKeys(c *gin.Context) {
+	if h.realityKeyVerificationService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "reality key verification service not initialized"})
+		return
+	}
+
+	nodeID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid node ID"})
+		return
+	}
+
+	result, err := h.realityKeyVerificationService.VerifySingleNode(uint(nodeID))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// verifyAllNodeKeys manually verifies REALITY keys for all nodes
+func (h *Handler) verifyAllNodeKeys(c *gin.Context) {
+	if h.realityKeyVerificationService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "reality key verification service not initialized"})
+		return
+	}
+
+	results, err := h.realityKeyVerificationService.VerifyAllNodes()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"results": results})
+}
+
+// fixNodeKeys auto-fixes mismatched REALITY keys for a single node
+func (h *Handler) fixNodeKeys(c *gin.Context) {
+	if h.realityKeyVerificationService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "reality key verification service not initialized"})
+		return
+	}
+
+	nodeID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid node ID"})
+		return
+	}
+
+	if err := h.realityKeyVerificationService.AutoFixMismatch(uint(nodeID)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// forceRotateKeys force-rotates REALITY keys for a single node (regardless of mismatch)
+func (h *Handler) forceRotateKeys(c *gin.Context) {
+	if h.realityKeyVerificationService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "reality key verification service not initialized"})
+		return
+	}
+
+	nodeID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid node ID"})
+		return
+	}
+
+	if err := h.realityKeyVerificationService.ForceRotateKeys(uint(nodeID)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// getNodeKeyStatus returns the key verification status for a node
+func (h *Handler) getNodeKeyStatus(c *gin.Context) {
+	if h.realityKeyVerificationService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "reality key verification service not initialized"})
+		return
+	}
+
+	nodeID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid node ID"})
+		return
+	}
+
+	status, err := h.realityKeyVerificationService.GetKeyStatus(uint(nodeID))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
 	}
 
 	c.JSON(http.StatusOK, status)

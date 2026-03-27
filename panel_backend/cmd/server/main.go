@@ -12,6 +12,7 @@ import (
 	"panel_backend/internal/config"
 	"panel_backend/internal/db"
 	"panel_backend/internal/services"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -31,7 +32,7 @@ func main() {
 	collector := services.NewBandwidthCollectorService(services.BandwidthCollectorConfig{
 		DB:              database,
 		NodeSharedToken: cfg.NodeSharedToken,
-		CollectInterval: 10 * time.Second,
+		CollectInterval: 60 * time.Second,
 		RequestTimeout:  30 * time.Second,
 		UserService:     userService,
 		NodeService:     nodeService,
@@ -41,7 +42,35 @@ func main() {
 	userClassificationService := services.NewUserClassificationService(database)
 	userClassificationScheduler := services.NewUserClassificationScheduler(userClassificationService, 24*time.Hour)
 
-	router := api.NewRouterWithServices(cfg, database, userService, nodeService, collector, userClassificationService, userClassificationScheduler)
+	// Start REALITY key verification scheduler
+	realityKeyVerificationService := services.NewRealityKeyVerificationService(
+		database,
+		nodeService,
+		cfg.NodeSharedToken,
+		30*time.Second,
+	)
+
+	// Get interval from env (default: 6 hours)
+	verificationIntervalHours := 6
+	if val := os.Getenv("REALITY_KEY_VERIFICATION_INTERVAL_HOURS"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+			verificationIntervalHours = parsed
+		}
+	}
+
+	// Get auto-fix setting from env (default: true)
+	autoFixEnabled := true
+	if val := os.Getenv("REALITY_KEY_AUTO_FIX_ENABLED"); val != "" {
+		autoFixEnabled = val == "true" || val == "1"
+	}
+
+	realityKeyScheduler := services.NewRealityKeyVerificationScheduler(
+		realityKeyVerificationService,
+		verificationIntervalHours,
+		autoFixEnabled,
+	)
+
+	router := api.NewRouterWithServices(cfg, database, userService, nodeService, collector, userClassificationService, userClassificationScheduler, realityKeyVerificationService, realityKeyScheduler)
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
 	server := &http.Server{
@@ -53,6 +82,7 @@ func main() {
 	defer stop()
 	collector.Start(ctx)
 	userClassificationScheduler.Start(ctx)
+	realityKeyScheduler.Start(ctx)
 
 	shutdownDone := make(chan struct{})
 	go func() {
@@ -62,6 +92,7 @@ func main() {
 		log.Println("shutting down...")
 		collector.Stop()
 		userClassificationScheduler.Stop()
+		realityKeyScheduler.Stop()
 
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()

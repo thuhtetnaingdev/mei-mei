@@ -65,7 +65,7 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 					},
 					"reality": map[string]interface{}{
 						"enabled":    node.RealityPublicKey != "",
-						"public_key": node.RealityPublicKey,
+						"public_key": toBase64URL(node.RealityPublicKey),
 						"short_id":   node.RealityShortID,
 					},
 				},
@@ -203,7 +203,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 				"skip-cert-verify":   true,
 				"client-fingerprint": "chrome",
 				"reality-opts": map[string]interface{}{
-					"public-key": node.RealityPublicKey,
+					"public-key": toBase64URL(node.RealityPublicKey),
 					"short-id":   node.RealityShortID,
 				},
 			})

@@ -21,7 +21,7 @@ func main() {
 
 	// Create config service (which includes bandwidth tracker)
 	configService := services.NewConfigService(cfg)
-	configService.StartBandwidthMonitoring(ctx, 10*time.Second)
+	configService.StartBandwidthMonitoring(ctx, 60*time.Second)
 
 	// Create router with config service
 	router := api.NewRouterWithConfigService(cfg, configService)

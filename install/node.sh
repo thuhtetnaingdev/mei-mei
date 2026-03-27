@@ -272,6 +272,7 @@ Type=simple
 ExecStart=/usr/bin/sing-box run -c ${INSTALL_DIR}/sing-box.generated.json
 Restart=always
 RestartSec=3
+LimitNOFILE=65535
 
 [Install]
 WantedBy=multi-user.target

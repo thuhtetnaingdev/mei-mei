@@ -1,7 +1,7 @@
 import axios from "axios";
 import type { InternalAxiosRequestConfig } from "axios";
 import { notifySessionExpired } from "../auth";
-import type { UserListOptions, UserListResult } from "../types";
+import type { KeyVerificationResult, NodeKeyStatus, UserListOptions, UserListResult } from "../types";
 
 type CompatAxiosRequestConfig = InternalAxiosRequestConfig & {
   _legacyRetryWithoutApiPrefix?: boolean;
@@ -75,6 +75,31 @@ api.interceptors.response.use(
 
 export const listUsers = async (params: UserListOptions): Promise<UserListResult> => {
   const response = await api.get<UserListResult>("/users", { params });
+  return response.data;
+};
+
+export const verifyNodeKeys = async (nodeId: number): Promise<KeyVerificationResult> => {
+  const response = await api.post<KeyVerificationResult>(`/nodes/${nodeId}/verify-keys`);
+  return response.data;
+};
+
+export const verifyAllNodeKeys = async (): Promise<{ results: KeyVerificationResult[] }> => {
+  const response = await api.post<{ results: KeyVerificationResult[] }>("/nodes/verify-all-keys");
+  return response.data;
+};
+
+export const fixNodeKeys = async (nodeId: number): Promise<{ success: boolean }> => {
+  const response = await api.post<{ success: boolean }>(`/nodes/${nodeId}/fix-keys`);
+  return response.data;
+};
+
+export const forceRotateKeys = async (nodeId: number): Promise<{ success: boolean }> => {
+  const response = await api.post<{ success: boolean }>(`/nodes/${nodeId}/force-rotate-keys`);
+  return response.data;
+};
+
+export const getNodeKeyStatus = async (nodeId: number): Promise<NodeKeyStatus> => {
+  const response = await api.get<NodeKeyStatus>(`/nodes/${nodeId}/key-status`);
   return response.data;
 };
 

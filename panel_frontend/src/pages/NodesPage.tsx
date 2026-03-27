@@ -1,9 +1,10 @@
 import { FormEvent, useEffect, useState } from "react";
-import { ExternalLink, Globe, PauseCircle, PlayCircle, Plus, RefreshCw, Trash2, Wrench } from "lucide-react";
-import api from "../api/client";
+import { ExternalLink, Globe, PauseCircle, PlayCircle, Plus, RefreshCw, Trash2, Wrench, CheckCircle2, Key, AlertTriangle, XCircle, RotateCw } from "lucide-react";
+import api, { verifyNodeKeys, verifyAllNodeKeys, fixNodeKeys, forceRotateKeys } from "../api/client";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { KeyStatusModal } from "../components/KeyStatusModal";
 import { SectionCard } from "../components/SectionCard";
-import type { Miner, Node, NodeDiagnosticResult } from "../types";
+import type { KeyVerificationResult, Miner, Node, NodeDiagnosticResult } from "../types";
 
 interface BootstrapResult {
   id: string;
@@ -88,6 +89,16 @@ export function NodesPage() {
     expiresAt: ""
   });
   const [form, setForm] = useState(emptyBootstrapForm);
+
+  // Key verification state
+  const [keyVerificationResult, setKeyVerificationResult] = useState<KeyVerificationResult | null>(null);
+  const [keyStatusModalOpen, setKeyStatusModalOpen] = useState(false);
+  const [isVerifyingNode, setIsVerifyingNode] = useState<number | null>(null);
+  const [isFixingNode, setIsFixingNode] = useState<number | null>(null);
+  const [isRotatingNode, setIsRotatingNode] = useState<number | null>(null);
+  const [isVerifyingAll, setIsVerifyingAll] = useState(false);
+  const [bulkVerificationResults, setBulkVerificationResults] = useState<KeyVerificationResult[]>([]);
+  const [showBulkResults, setShowBulkResults] = useState(false);
 
   const loadNodes = () => api.get<Node[]>("/nodes").then((res) => setNodes(res.data));
   const loadMiners = () => api.get<Miner[]>("/miners").then((res) => setMiners(res.data));
@@ -302,6 +313,134 @@ export function NodesPage() {
     }
   };
 
+  const handleVerifyNodeKeys = async (nodeId: number, nodeName: string) => {
+    setIsVerifyingNode(nodeId);
+    setNodeActionStatus("");
+
+    try {
+      const result = await verifyNodeKeys(nodeId);
+      setKeyVerificationResult(result);
+      setKeyStatusModalOpen(true);
+      // Wait a moment for DB to update, then refresh the node list
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await loadNodes();
+      setNodeActionStatus(`Verified keys for ${nodeName}.`);
+    } catch (error) {
+      const message = getRequestErrorMessage(error, "Key verification failed");
+      setNodeActionStatus(message);
+      setKeyVerificationResult({
+        nodeId,
+        nodeName,
+        status: "error",
+        publicKeyMatch: false,
+        shortIDMatch: false,
+        panelPublicKey: "",
+        nodePublicKey: "",
+        panelShortId: "",
+        nodeShortId: "",
+        error: message
+      });
+      setKeyStatusModalOpen(true);
+    } finally {
+      setIsVerifyingNode(null);
+    }
+  };
+
+  const handleFixNodeKeys = async (nodeId: number, nodeName: string) => {
+    setIsFixingNode(nodeId);
+    setNodeActionStatus("");
+
+    try {
+      const result = await fixNodeKeys(nodeId);
+      if (result.success) {
+        // Wait for DB to update, then refresh the node list
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await loadNodes();
+        setNodeActionStatus(`Auto-fixed keys for ${nodeName}.`);
+        // Refresh the key status modal if open
+        if (keyStatusModalOpen) {
+          const refreshedResult = await verifyNodeKeys(nodeId);
+          setKeyVerificationResult(refreshedResult);
+        }
+      } else {
+        setNodeActionStatus(`Failed to fix keys for ${nodeName}.`);
+      }
+    } catch (error) {
+      setNodeActionStatus(getRequestErrorMessage(error, "Auto-fix failed"));
+    } finally {
+      setIsFixingNode(null);
+    }
+  };
+
+  const handleForceRotateKeys = async (nodeId: number, nodeName: string) => {
+    setIsRotatingNode(nodeId);
+    setNodeActionStatus("");
+
+    try {
+      const result = await forceRotateKeys(nodeId);
+      if (result.success) {
+        // Wait for DB to update, then refresh the node list
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await loadNodes();
+        setNodeActionStatus(`Force rotated keys for ${nodeName}.`);
+        // Refresh the key status modal if open
+        if (keyStatusModalOpen) {
+          const refreshedResult = await verifyNodeKeys(nodeId);
+          setKeyVerificationResult(refreshedResult);
+        }
+      } else {
+        setNodeActionStatus(`Failed to rotate keys for ${nodeName}.`);
+      }
+    } catch (error) {
+      setNodeActionStatus(getRequestErrorMessage(error, "Force rotation failed"));
+    } finally {
+      setIsRotatingNode(null);
+    }
+  };
+
+  const handleVerifyAllKeys = async () => {
+    setIsVerifyingAll(true);
+    setNodeActionStatus("");
+
+    try {
+      const response = await verifyAllNodeKeys();
+      setBulkVerificationResults(response.results ?? []);
+      setShowBulkResults(true);
+
+      const verifiedCount = (response.results ?? []).filter((r) => r.status === "verified").length;
+      const totalCount = response.results?.length ?? 0;
+      setNodeActionStatus(`Verified ${verifiedCount}/${totalCount} nodes.`);
+      await loadNodes();
+    } catch (error) {
+      setNodeActionStatus(getRequestErrorMessage(error, "Bulk verification failed"));
+    } finally {
+      setIsVerifyingAll(false);
+    }
+  };
+
+  const openKeyStatusModal = async (node: Node) => {
+    try {
+      const result = await verifyNodeKeys(node.id);
+      setKeyVerificationResult(result);
+      setKeyStatusModalOpen(true);
+    } catch (error) {
+      const message = getRequestErrorMessage(error, "Failed to load key status");
+      setKeyVerificationResult({
+        nodeId: node.id,
+        nodeName: node.name,
+        status: "error",
+        publicKeyMatch: false,
+        shortIDMatch: false,
+        panelPublicKey: "",
+        nodePublicKey: "",
+        panelShortId: "",
+        nodeShortId: "",
+        error: message
+      });
+      setKeyStatusModalOpen(true);
+    }
+  };
+
   const bootstrapFields = [
     { key: "name", label: "Node Name", placeholder: "sg-1", type: "text" },
     { key: "ip", label: "VPS IP", placeholder: "203.0.113.10", type: "text" },
@@ -468,6 +607,15 @@ export function NodesPage() {
             >
               <Wrench className="h-3.5 w-3.5" />
               {isRunningDiagnostics ? "Testing..." : "Test"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleVerifyAllKeys()}
+              disabled={isVerifyingAll}
+              className="btn-secondary gap-1.5 px-3 py-2 text-sm"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              {isVerifyingAll ? "Verifying..." : "Verify All"}
             </button>
           </div>
         </div>
@@ -793,6 +941,36 @@ export function NodesPage() {
                                 Delete
                               </button>
                             </div>
+                            <div className="mt-2 flex flex-wrap gap-2 border-t border-white/8 pt-2">
+                              <button
+                                onClick={() => void handleVerifyNodeKeys(node.id, node.name)}
+                                disabled={isVerifyingNode === node.id}
+                                className={inventoryActionClass}
+                                title="Verify node keys"
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                {isVerifyingNode === node.id ? "Verifying..." : "Verify Keys"}
+                              </button>
+                              {node.syncVerificationStatus === "mismatch" ? (
+                                <button
+                                  onClick={() => void handleFixNodeKeys(node.id, node.name)}
+                                  disabled={isFixingNode === node.id}
+                                  className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-violet-400/20 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-100 transition hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                                  title="Auto-fix node keys"
+                                >
+                                  <Key className={`h-3.5 w-3.5 ${isFixingNode === node.id ? "animate-spin" : ""}`} />
+                                  {isFixingNode === node.id ? "Fixing..." : "Auto-Fix"}
+                                </button>
+                              ) : null}
+                              <button
+                                onClick={() => void openKeyStatusModal(node)}
+                                className={inventoryActionClass}
+                                title="View key status details"
+                              >
+                                <Key className="h-3.5 w-3.5" />
+                                Key Status
+                              </button>
+                            </div>
                             <div className="mt-2 border-t border-white/8 pt-2">
                               <button
                                 onClick={() => setUninstallTarget(node)}
@@ -1010,6 +1188,83 @@ export function NodesPage() {
         onCancel={() => setReinstallTarget(null)}
         onConfirm={() => void reinstallNode()}
       />
+
+      <KeyStatusModal
+        open={keyStatusModalOpen}
+        result={keyVerificationResult}
+        onClose={() => setKeyStatusModalOpen(false)}
+        onVerify={keyVerificationResult ? () => void handleVerifyNodeKeys(keyVerificationResult.nodeId, keyVerificationResult.nodeName) : undefined}
+        onFix={keyVerificationResult && keyVerificationResult.status !== "verified" ? () => void handleFixNodeKeys(keyVerificationResult.nodeId, keyVerificationResult.nodeName) : undefined}
+        onForceRotate={() => keyVerificationResult ? void handleForceRotateKeys(keyVerificationResult.nodeId, keyVerificationResult.nodeName) : undefined}
+        isVerifying={isVerifyingNode === keyVerificationResult?.nodeId}
+        isFixing={isFixingNode === keyVerificationResult?.nodeId}
+        isRotating={isRotatingNode === keyVerificationResult?.nodeId}
+      />
+
+      <ConfirmDialog
+        open={showBulkResults}
+        title="Bulk Key Verification Results"
+        description={`Verified ${bulkVerificationResults.filter((r) => r.status === "verified").length} of ${bulkVerificationResults.length} nodes.`}
+        hideActions
+        panelClassName="max-w-4xl"
+        onCancel={() => setShowBulkResults(false)}
+        onConfirm={() => undefined}
+      >
+        <div className="mt-4 max-h-96 overflow-auto">
+          <div className="space-y-2">
+            {bulkVerificationResults.map((result) => {
+              const isVerified = result.status === "verified";
+              const hasMismatch = result.status === "mismatch";
+
+              return (
+                <div
+                  key={result.nodeId}
+                  className={`rounded-[16px] border px-3 py-2.5 ${
+                    isVerified
+                      ? "border-emerald-400/15 bg-emerald-400/10"
+                      : hasMismatch
+                        ? "border-amber-300/15 bg-amber-300/10"
+                        : "border-rose-400/15 bg-rose-400/10"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`h-2 w-2 rounded-full ${
+                          isVerified ? "bg-emerald-400" : hasMismatch ? "bg-amber-300" : "bg-rose-400"
+                        }`} />
+                        <p className="text-sm font-semibold text-white">{result.nodeName}</p>
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
+                        <span>Public Key: {result.publicKeyMatch ? "Match" : "Mismatch"}</span>
+                        <span>Short ID: {result.shortIDMatch ? "Match" : "Mismatch"}</span>
+                        {result.error ? <span className="text-rose-300">{result.error}</span> : null}
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      {isVerified ? (
+                        <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+                      ) : hasMismatch ? (
+                        <AlertTriangle className="h-5 w-5 text-amber-300" />
+                      ) : (
+                        <XCircle className="h-5 w-5 text-rose-400" />
+                      )}
+                      <span className="text-xs text-slate-500">
+                        {new Date(result.verifiedAt || Date.now()).toLocaleTimeString()}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div className="mt-6 flex justify-end">
+          <button type="button" onClick={() => setShowBulkResults(false)} className="btn-secondary">
+            Close
+          </button>
+        </div>
+      </ConfirmDialog>
     </div>
   );
 }

@@ -1,25 +1,14 @@
 package services
 
 import (
-	"bufio"
+	"context"
 	"fmt"
-	"os"
-	"os/exec"
-	"regexp"
-	"sort"
-	"strconv"
-	"strings"
+	"log"
 	"sync"
 	"time"
-)
 
-// BandwidthSample represents a point-in-time bandwidth measurement
-type BandwidthSample struct {
-	Timestamp  time.Time
-	TotalBytes int64
-	RXBytes    int64
-	TXBytes    int64
-}
+	"node_backend/internal/singbox/stats"
+)
 
 // UserBandwidthUsage tracks bandwidth usage for a specific user
 type UserBandwidthUsage struct {
@@ -29,29 +18,65 @@ type UserBandwidthUsage struct {
 	ActiveConns int
 }
 
-// BandwidthTracker monitors and tracks bandwidth usage per user
+// BandwidthTracker monitors and tracks bandwidth usage per user using sing-box v2ray_api stats
 type BandwidthTracker struct {
-	mu                 sync.RWMutex
-	apiAddress         string
-	lastSample         BandwidthSample
-	currentPeriodUsage map[string]*UserBandwidthUsage
-	activeUsers        map[string]bool // Set of active user UUIDs
-	lastUserTotals     map[string]int64
-	connectionCounts   map[string]int // UUID -> connection count
-	totalConnections   int
+	mu sync.RWMutex
+
+	// Stats API client
+	statsClient *stats.StatsClient
+	apiAddress  string
+	v2rayAPIEnabled bool
+
+	// User tracking
+	currentPeriodUsage map[string]*UserBandwidthUsage // UUID -> usage
+	activeUsers        map[string]string              // UUID -> Email mapping
+	emailToUUID        map[string]string              // Email -> UUID mapping
+
+	// Stats tracking for delta calculation
+	lastUserStats map[string]userStatsSnapshot // Email -> last RX/TX snapshot
+
+	// Rate limiting for stats queries (security hardening)
+	lastQueryTime    time.Time
+	minQueryInterval time.Duration // Minimum 100ms between queries to prevent DoS
+
+	// Connection tracking (kept for API compatibility, always 0 in stats-based mode)
+	totalConnections int
+
+	// Exponential backoff for gRPC failures
+	consecutiveFailures int
+	lastFailureTime     time.Time
+	currentBackoff      time.Duration // Current backoff duration
+	maxBackoff          time.Duration // Maximum backoff (5 minutes)
 }
 
-var singboxUserLogPattern = regexp.MustCompile(`\[([^\]]+)\]\s+inbound connection`)
+// userStatsSnapshot holds a point-in-time snapshot of user traffic stats
+type userStatsSnapshot struct {
+	RX int64 // Cumulative received bytes from sing-box start
+	TX int64 // Cumulative sent bytes from sing-box start
+}
 
 // NewBandwidthTracker creates a new bandwidth tracker
 func NewBandwidthTracker(apiAddress string) *BandwidthTracker {
-	return &BandwidthTracker{
+	tracker := &BandwidthTracker{
 		currentPeriodUsage: make(map[string]*UserBandwidthUsage),
-		activeUsers:        make(map[string]bool),
-		lastUserTotals:     make(map[string]int64),
-		connectionCounts:   make(map[string]int),
-		apiAddress:         strings.TrimSpace(apiAddress),
+		activeUsers:        make(map[string]string),
+		emailToUUID:        make(map[string]string),
+		lastUserStats:      make(map[string]userStatsSnapshot),
+		apiAddress:         apiAddress,
+		v2rayAPIEnabled:    apiAddress != "",
+		minQueryInterval:   100 * time.Millisecond, // Rate limit: min 100ms between queries
+		// Exponential backoff initialization
+		consecutiveFailures: 0,
+		maxBackoff:          5 * time.Minute,
+		currentBackoff:      0,
 	}
+
+	// Initialize stats client if API address is provided
+	if tracker.v2rayAPIEnabled {
+		tracker.statsClient = stats.NewStatsClient(apiAddress)
+	}
+
+	return tracker
 }
 
 // UpdateActiveUsers updates the list of active users for bandwidth attribution
@@ -64,12 +89,49 @@ func (t *BandwidthTracker) UpdateActiveUsers(users []struct {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	newActiveUsers := make(map[string]bool)
+	// Build set of new user UUIDs to check for complete user set change
+	newUserUUIDs := make(map[string]bool)
+	for _, user := range users {
+		if user.Enabled {
+			newUserUUIDs[user.UUID] = true
+		}
+	}
+
+	// Detect complete user set change (fresh registration or node repurposed)
+	// Reset bandwidth tracking if ALL previous users are gone and we have new users
+	shouldReset := false
+	if len(newUserUUIDs) > 0 && len(t.activeUsers) > 0 {
+		// Check if there's ANY overlap between old and new users
+		hasOverlap := false
+		for uuid := range t.activeUsers {
+			if newUserUUIDs[uuid] {
+				hasOverlap = true
+				break
+			}
+		}
+		// No overlap = completely new user set, reset tracking
+		if !hasOverlap {
+			shouldReset = true
+		}
+	} else if len(newUserUUIDs) > 0 && len(t.activeUsers) == 0 && len(t.currentPeriodUsage) > 0 {
+		// First config with users, but currentPeriodUsage has stale data
+		shouldReset = true
+	}
+
+	if shouldReset {
+		log.Printf("[bandwidth-tracker] resetting accumulated usage for fresh node registration (detected complete user set change)")
+		t.currentPeriodUsage = make(map[string]*UserBandwidthUsage)
+		t.lastUserStats = make(map[string]userStatsSnapshot)
+	}
+
+	newActiveUsers := make(map[string]string)
+	newEmailToUUID := make(map[string]string)
 
 	// Update with new active users
 	for _, user := range users {
 		if user.Enabled {
-			newActiveUsers[user.UUID] = true
+			newActiveUsers[user.UUID] = user.Email
+			newEmailToUUID[user.Email] = user.UUID
 
 			// Initialize or update user usage record
 			if _, exists := t.currentPeriodUsage[user.UUID]; !exists {
@@ -78,261 +140,249 @@ func (t *BandwidthTracker) UpdateActiveUsers(users []struct {
 					Email: user.Email,
 				}
 			} else {
+				// Update email if changed
 				if t.currentPeriodUsage[user.UUID].Email != user.Email {
-					delete(t.lastUserTotals, user.UUID)
+					// Email changed, reset last stats to avoid incorrect delta
+					delete(t.lastUserStats, t.currentPeriodUsage[user.UUID].Email)
 				}
 				t.currentPeriodUsage[user.UUID].Email = user.Email
 			}
 		}
 	}
 
+	// Handle removed users
 	for uuid := range t.activeUsers {
-		if newActiveUsers[uuid] {
+		if _, exists := newActiveUsers[uuid]; exists {
 			continue
 		}
-		delete(t.lastUserTotals, uuid)
-		if usage, exists := t.currentPeriodUsage[uuid]; exists {
-			usage.ActiveConns = 0
-			usage.BytesUsed = 0
+		// User was removed, clean up their stats snapshot ONLY
+		if email, exists := t.activeUsers[uuid]; exists {
+			delete(t.lastUserStats, email)
 		}
+		// DON'T delete currentPeriodUsage here - let GetAndResetUsage handle it
+		// This ensures final usage is reported to panel
 	}
 
 	t.activeUsers = newActiveUsers
+	t.emailToUUID = newEmailToUUID
+
+	// Aggressive cleanup: Remove lastUserStats entries for ANY email not in new active set
+	// This prevents memory leak when users are disabled without traffic or re-enabled rapidly
+	for email := range t.lastUserStats {
+		if _, isActive := newEmailToUUID[email]; !isActive {
+			delete(t.lastUserStats, email)
+		}
+	}
 }
 
-func readBandwidthSample() (BandwidthSample, error) {
-	file, err := os.Open("/proc/net/dev")
+// ConnectStatsClient connects to the sing-box stats API
+func (t *BandwidthTracker) ConnectStatsClient() error {
+	t.mu.RLock()
+	client := t.statsClient
+	enabled := t.v2rayAPIEnabled
+	t.mu.RUnlock()
+
+	if !enabled || client == nil {
+		return fmt.Errorf("v2ray API is disabled or not configured")
+	}
+
+	return client.Connect()
+}
+
+// querySingboxStats queries sing-box stats API for per-user traffic
+// Returns map[email]UserTraffic with cumulative RX/TX bytes
+func (t *BandwidthTracker) querySingboxStats() (map[string]stats.UserTraffic, error) {
+	t.mu.RLock()
+	client := t.statsClient
+	enabled := t.v2rayAPIEnabled
+	t.mu.RUnlock()
+
+	if !enabled || client == nil {
+		return nil, fmt.Errorf("v2ray API is disabled or not configured")
+	}
+
+	if !client.IsConnected() {
+		// Attempt to connect if not already connected
+		if err := client.Connect(); err != nil {
+			log.Printf("[bandwidth-tracker] stats API connection failed: %v", err)
+			return nil, err
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	traffic, err := client.GetUserTraffic(ctx, false)
 	if err != nil {
-		return BandwidthSample{}, fmt.Errorf("failed to open /proc/net/dev: %w", err)
-	}
-	defer file.Close()
-
-	var totalRX, totalTX int64
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || !strings.Contains(line, ":") {
-			continue
+		// Try reconnecting on error
+		log.Printf("[bandwidth-tracker] stats query failed: %v, attempting reconnect", err)
+		if reconnectErr := client.Reconnect(); reconnectErr != nil {
+			log.Printf("[bandwidth-tracker] reconnect failed: %v", reconnectErr)
 		}
-
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		iface := strings.TrimSpace(parts[0])
-		// Skip loopback interface
-		if iface == "lo" {
-			continue
-		}
-
-		fields := strings.Fields(parts[1])
-		if len(fields) < 9 {
-			continue
-		}
-
-		rxBytes, rxErr := strconv.ParseInt(fields[0], 10, 64)
-		txBytes, txErr := strconv.ParseInt(fields[8], 10, 64)
-		if rxErr != nil || txErr != nil {
-			continue
-		}
-
-		totalRX += rxBytes
-		totalTX += txBytes
+		return nil, err
 	}
 
-	if err := scanner.Err(); err != nil {
-		return BandwidthSample{}, fmt.Errorf("error reading /proc/net/dev: %w", err)
-	}
-
-	sample := BandwidthSample{
-		Timestamp:  time.Now(),
-		TotalBytes: totalRX + totalTX,
-		RXBytes:    totalRX,
-		TXBytes:    totalTX,
-	}
-
-	return sample, nil
+	return traffic, nil
 }
 
-// SampleBandwidth takes a new bandwidth sample from system interfaces.
-func (t *BandwidthTracker) SampleBandwidth() (BandwidthSample, error) {
-	sample, err := readBandwidthSample()
-	if err != nil {
-		return BandwidthSample{}, err
-	}
-
-	t.mu.Lock()
-	t.lastSample = sample
-	t.mu.Unlock()
-
-	return sample, nil
+// CollectUsage reads stats from sing-box and accrues the delta into the current period.
+// Returns total delta bytes, duration (always 0 in stats mode), and error.
+func (t *BandwidthTracker) CollectUsage() (int64, time.Duration, error) {
+	return t.collectUsageFromStats()
 }
 
-// UpdateConnectionCounts updates the connection count per user by parsing sing-box connections
-func (t *BandwidthTracker) UpdateConnectionCounts(ports ...int) {
+func (t *BandwidthTracker) collectUsageFromStats() (int64, time.Duration, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	connCounts := t.getConnectionCountsFromLogsLocked()
-	totalConnections := 0
-	for _, count := range connCounts {
-		totalConnections += count
-	}
-
-	if totalConnections == 0 {
-		for _, port := range ports {
-			count, err := getActiveConnections(port)
-			if err != nil {
-				continue
-			}
-			totalConnections += count
+	// Check if in backoff period
+	if t.consecutiveFailures > 0 {
+		backoffRemaining := t.currentBackoff - time.Since(t.lastFailureTime)
+		if backoffRemaining > 0 {
+			log.Printf("[bandwidth-tracker] in backoff, %v remaining", backoffRemaining)
+			return 0, 0, nil // Skip this collection cycle
 		}
-		if totalConnections > 0 && len(t.activeUsers) == 1 {
-			for uuid := range t.activeUsers {
-				connCounts[uuid] = totalConnections
-			}
-		}
+		// Backoff period expired, reset and try
+		log.Printf("[bandwidth-tracker] backoff expired, attempting reconnect")
+		t.consecutiveFailures = 0
+		t.currentBackoff = 0
 	}
 
-	// Update connection counts
-	t.connectionCounts = connCounts
-	t.totalConnections = totalConnections
-
-	// Update active connection counts in user usage records
-	for uuid, count := range connCounts {
-		if usage, exists := t.currentPeriodUsage[uuid]; exists {
-			usage.ActiveConns = count
-		}
+	// Security: Rate limit stats queries to prevent DoS
+	// Normal polling interval is 60s, so 100ms minimum is very conservative
+	if time.Since(t.lastQueryTime) < t.minQueryInterval {
+		return 0, 0, nil
 	}
-}
+	t.lastQueryTime = time.Now()
 
-func (t *BandwidthTracker) getConnectionCountsFromLogsLocked() map[string]int {
-	emailToUUID := make(map[string]string, len(t.currentPeriodUsage))
-	for uuid, usage := range t.currentPeriodUsage {
-		if usage == nil {
-			continue
-		}
-		email := strings.TrimSpace(strings.ToLower(usage.Email))
-		if email == "" {
-			continue
-		}
-		emailToUUID[email] = uuid
-	}
-	if len(emailToUUID) == 0 {
-		return make(map[string]int)
-	}
-
-	output, err := readRecentSingboxLogs()
-	if err != nil || strings.TrimSpace(output) == "" {
-		return make(map[string]int)
-	}
-
-	return parseConnectionCountsFromLogs(output, emailToUUID)
-}
-
-// getConnectionCountsByPort attempts to get connection counts from sing-box
-// Since sing-box doesn't expose per-user connections directly, we use connection tracking
-func getConnectionCountsByPort(ports ...int) map[string]int {
-	// This is a placeholder - in production, you would:
-	// 1. Use eBPF to track connections per UUID
-	// 2. Parse sing-box access logs if enabled
-	// 3. Use netstat/ss to count connections per port and distribute
-
-	// For now, return empty map - bandwidth will be distributed equally among active users
-	return make(map[string]int)
-}
-
-// CollectUsage reads a new sample and accrues the delta into the current period.
-func (t *BandwidthTracker) CollectUsage() (int64, time.Duration, error) {
-	return t.collectUsageFromInterfaces()
-}
-
-func (t *BandwidthTracker) collectUsageFromInterfaces() (int64, time.Duration, error) {
-	currentSample, err := readBandwidthSample()
+	// Query stats from sing-box
+	traffic, err := t.querySingboxStatsLocked()
 	if err != nil {
+		// Log but don't fail - panel will get 0 usage this period
+		// Use sanitized error to prevent potential information leakage
+		log.Printf("[bandwidth-tracker] collect usage failed: %s", stats.SanitizeError(err.Error()))
 		return 0, 0, err
 	}
 
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if t.lastSample.Timestamp.IsZero() {
-		t.lastSample = currentSample
+	if len(traffic) == 0 {
 		return 0, 0, nil
 	}
 
-	delta := currentSample.TotalBytes - t.lastSample.TotalBytes
-	duration := currentSample.Timestamp.Sub(t.lastSample.Timestamp)
-	t.lastSample = currentSample
+	totalDelta := int64(0)
 
-	if delta <= 0 || len(t.activeUsers) == 0 {
-		if delta < 0 {
+	// Calculate delta for each user and accumulate
+	for email, userTraffic := range traffic {
+		uuid, exists := t.emailToUUID[email]
+		if !exists {
+			// Traffic for unknown user, skip
+			continue
+		}
+
+		// Get last snapshot for this user
+		lastStats, hasLastStats := t.lastUserStats[email]
+
+		// Calculate delta (RX + TX)
+		var delta int64
+		if hasLastStats {
+			// Normal case: calculate delta from last snapshot
+			rxDelta := userTraffic.RX - lastStats.RX
+			txDelta := userTraffic.TX - lastStats.TX
+
+			// Handle counter reset (sing-box restart) - if current < last, assume restart
+			if rxDelta < 0 {
+				log.Printf("[bandwidth-tracker] counter reset detected for %s (RX: %d -> %d)", email, lastStats.RX, userTraffic.RX)
+				rxDelta = userTraffic.RX // Counter reset, use current value
+			}
+			if txDelta < 0 {
+				log.Printf("[bandwidth-tracker] counter reset detected for %s (TX: %d -> %d)", email, lastStats.TX, userTraffic.TX)
+				txDelta = userTraffic.TX // Counter reset, use current value
+			}
+
+			delta = rxDelta + txDelta
+		} else {
+			// First sample for this user - no delta to report
+			// Just record the baseline
 			delta = 0
 		}
-		return delta, duration, nil
+
+		// Update snapshot for next iteration
+		t.lastUserStats[email] = userStatsSnapshot{
+			RX: userTraffic.RX,
+			TX: userTraffic.TX,
+		}
+
+		// Accumulate delta into user's period usage
+		if delta > 0 && uuid != "" {
+			if usage, exists := t.currentPeriodUsage[uuid]; exists {
+				usage.BytesUsed += delta
+				totalDelta += delta
+			}
+		}
 	}
 
-	// Ignore background server traffic if the node has no active proxy
-	// connections at all during this sample window.
-	if t.totalConnections <= 0 {
-		return delta, duration, nil
-	}
-
-	t.attributeInterfaceDeltaLocked(delta)
-
-	return delta, duration, nil
+	// On success: reset failure counter
+	t.consecutiveFailures = 0
+	t.currentBackoff = 0
+	return totalDelta, 0, nil
 }
 
-func (t *BandwidthTracker) attributeInterfaceDeltaLocked(delta int64) {
-	if delta <= 0 {
-		return
+// querySingboxStatsLocked queries stats while holding the lock
+// Must be called with t.mu already locked
+func (t *BandwidthTracker) querySingboxStatsLocked() (map[string]stats.UserTraffic, error) {
+	if !t.v2rayAPIEnabled || t.statsClient == nil {
+		return nil, fmt.Errorf("v2ray API is disabled or not configured")
 	}
 
-	weightedUsers := make([]string, 0, len(t.activeUsers))
-	totalWeight := 0
-	for uuid := range t.activeUsers {
-		if count := t.connectionCounts[uuid]; count > 0 {
-			weightedUsers = append(weightedUsers, uuid)
-			totalWeight += count
+	if !t.statsClient.IsConnected() {
+		if err := t.statsClient.Connect(); err != nil {
+			return nil, err
 		}
 	}
 
-	if totalWeight > 0 {
-		sort.Strings(weightedUsers)
-		remaining := delta
-		for index, uuid := range weightedUsers {
-			weight := t.connectionCounts[uuid]
-			if weight <= 0 {
-				continue
-			}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-			userBytes := (delta * int64(weight)) / int64(totalWeight)
-			if index == len(weightedUsers)-1 {
-				userBytes = remaining
-			}
-			if userBytes < 0 {
-				userBytes = 0
-			}
-			remaining -= userBytes
-
-			if usage, exists := t.currentPeriodUsage[uuid]; exists {
-				usage.BytesUsed += userBytes
-			}
+	traffic, err := t.statsClient.GetUserTraffic(ctx, false)
+	if err != nil {
+		// Use sanitized error
+		log.Printf("[bandwidth-tracker] stats query failed: %s", stats.SanitizeError(err.Error()))
+		
+		// Increment failure counter and calculate backoff
+		t.consecutiveFailures++
+		
+		// Binary exponential backoff: 60s, 120s, 240s, 480s, capped at maxBackoff
+		baseInterval := 60 * time.Second
+		backoff := baseInterval * time.Duration(1<<uint(t.consecutiveFailures-1))
+		if backoff > t.maxBackoff || backoff < baseInterval { // Handle overflow
+			backoff = t.maxBackoff
 		}
-		return
-	}
-
-	if len(t.activeUsers) != 1 {
-		return
-	}
-
-	for uuid := range t.activeUsers {
-		if usage, exists := t.currentPeriodUsage[uuid]; exists {
-			usage.BytesUsed += delta
+		t.currentBackoff = backoff
+		t.lastFailureTime = time.Now()
+		
+		log.Printf("[bandwidth-tracker] failure #%d, backing off for %v", t.consecutiveFailures, backoff)
+		
+		// Try reconnecting (but don't expect success during backoff)
+		if reconnectErr := t.statsClient.Reconnect(); reconnectErr != nil {
+			log.Printf("[bandwidth-tracker] reconnect failed: %s", stats.SanitizeError(reconnectErr.Error()))
 		}
-		return
+		return nil, err
 	}
+
+	return traffic, nil
+}
+
+// SampleBandwidth is kept for API compatibility but returns zero values in stats-based mode
+func (t *BandwidthTracker) SampleBandwidth() (BandwidthSample, error) {
+	return BandwidthSample{}, fmt.Errorf("stats-based mode: use CollectUsage instead")
+}
+
+// UpdateConnectionCounts is a no-op in stats-based mode (kept for API compatibility)
+func (t *BandwidthTracker) UpdateConnectionCounts(ports ...int) {
+	// Stats-based mode doesn't need connection counting
+	// Traffic is directly attributed to users via sing-box stats
+	t.mu.Lock()
+	t.totalConnections = 0
+	t.mu.Unlock()
 }
 
 // GetAndResetUsage returns the current period usage and resets for the next period
@@ -341,17 +391,41 @@ func (t *BandwidthTracker) GetAndResetUsage() []UserBandwidthUsage {
 	defer t.mu.Unlock()
 
 	usage := make([]UserBandwidthUsage, 0, len(t.currentPeriodUsage))
-	for _, userUsage := range t.currentPeriodUsage {
+	toDelete := make([]string, 0)
+
+	for uuid, userUsage := range t.currentPeriodUsage {
+		// Capture usage for reporting
 		if userUsage.BytesUsed > 0 {
-			usage = append(usage, *userUsage)
+			usage = append(usage, UserBandwidthUsage{
+				UUID:        userUsage.UUID,
+				Email:       userUsage.Email,
+				BytesUsed:   userUsage.BytesUsed,
+				ActiveConns: 0, // Stats-based mode doesn't track connections
+			})
 		}
-		// Reset bytes for next period but keep the record
+
+		// Reset for next period
 		userUsage.BytesUsed = 0
 		userUsage.ActiveConns = 0
+
+		// Mark inactive users for deletion (after reporting)
+		if _, isActive := t.activeUsers[uuid]; !isActive {
+			toDelete = append(toDelete, uuid)
+		}
 	}
 
-	// Reset connection counts
-	t.connectionCounts = make(map[string]int)
+	// Delete inactive users AFTER capturing their usage
+	for _, uuid := range toDelete {
+		delete(t.currentPeriodUsage, uuid)
+		// Also clean up emailToUUID mapping
+		// Find email for this UUID
+		for email, u := range t.emailToUUID {
+			if u == uuid {
+				delete(t.emailToUUID, email)
+				break
+			}
+		}
+	}
 
 	return usage
 }
@@ -378,207 +452,51 @@ func (t *BandwidthTracker) GetStatus() map[string]interface{} {
 		total += usage.BytesUsed
 	}
 
-	return map[string]interface{}{
+	status := map[string]interface{}{
 		"apiAddress":       t.apiAddress,
-		"lastSampleTime":   t.lastSample.Timestamp,
-		"totalBytes":       t.lastSample.TotalBytes,
+		"v2rayAPIEnabled":  t.v2rayAPIEnabled,
 		"activeUsers":      len(t.activeUsers),
-		"activeConns":      t.totalConnections,
 		"trackedUsers":     len(t.currentPeriodUsage),
 		"periodUsageBytes": total,
 	}
+
+	if t.statsClient != nil {
+		status["statsConnected"] = t.statsClient.IsConnected()
+	} else {
+		status["statsConnected"] = false
+	}
+
+	return status
 }
 
+// DisableV2RayAPI disables the v2ray API and falls back to disabled mode
 func (t *BandwidthTracker) DisableV2RayAPI() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	t.v2rayAPIEnabled = false
 	t.apiAddress = ""
+
+	if t.statsClient != nil {
+		t.statsClient.Close()
+		t.statsClient = nil
+	}
+
+	log.Printf("[bandwidth-tracker] v2ray API disabled")
 }
 
-func readRecentSingboxLogs() (string, error) {
-	cmd := exec.Command("journalctl", "-u", "meimei-sing-box", "--since", "30 seconds ago", "--no-pager", "-o", "cat")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return string(output), nil
+// IsV2RayAPIEnabled returns whether v2ray API is enabled
+func (t *BandwidthTracker) IsV2RayAPIEnabled() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.v2rayAPIEnabled
 }
 
-func parseConnectionCountsFromLogs(output string, emailToUUID map[string]string) map[string]int {
-	connCounts := make(map[string]int)
-	for _, line := range strings.Split(output, "\n") {
-		matches := singboxUserLogPattern.FindStringSubmatch(line)
-		if len(matches) != 2 {
-			continue
-		}
-
-		email := strings.TrimSpace(strings.ToLower(matches[1]))
-		uuid, exists := emailToUUID[email]
-		if !exists {
-			continue
-		}
-		connCounts[uuid]++
-	}
-
-	return connCounts
-}
-
-// readBandwidthUsageBytes reads total bandwidth from /proc/net/dev
-// This is the legacy function kept for compatibility
-func readBandwidthUsageBytes() int64 {
-	file, err := os.Open("/proc/net/dev")
-	if err != nil {
-		return 0
-	}
-	defer file.Close()
-
-	var total int64
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || !strings.Contains(line, ":") {
-			continue
-		}
-
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		iface := strings.TrimSpace(parts[0])
-		if iface == "lo" {
-			continue
-		}
-
-		fields := strings.Fields(parts[1])
-		if len(fields) < 9 {
-			continue
-		}
-
-		rxBytes, rxErr := strconv.ParseInt(fields[0], 10, 64)
-		txBytes, txErr := strconv.ParseInt(fields[8], 10, 64)
-		if rxErr != nil || txErr != nil {
-			continue
-		}
-
-		total += rxBytes + txBytes
-	}
-
-	return total
-}
-
-// parseSSOutput parses ss command output to extract connection information
-func parseSSOutput(output string) map[string]int {
-	connCounts := make(map[string]int)
-	lines := strings.Split(output, "\n")
-
-	for _, line := range lines[1:] { // Skip header
-		fields := strings.Fields(line)
-		if len(fields) < 5 {
-			continue
-		}
-
-		// Look for UUID patterns in the connection info
-		// sing-box uses UUID in various formats in connection details
-		for _, field := range fields {
-			if isUUID(field) {
-				connCounts[field]++
-			}
-		}
-	}
-
-	return connCounts
-}
-
-// isUUID checks if a string looks like a UUID
-func isUUID(s string) bool {
-	// Remove common prefixes/suffixes
-	s = strings.TrimPrefix(s, "uuid:")
-	s = strings.TrimSuffix(s, ",")
-
-	// Standard UUID format: 8-4-4-4-12 hex characters
-	if len(s) != 36 {
-		return false
-	}
-
-	parts := strings.Split(s, "-")
-	if len(parts) != 5 {
-		return false
-	}
-
-	expected := []int{8, 4, 4, 4, 12}
-	for i, part := range parts {
-		if len(part) != expected[i] {
-			return false
-		}
-		for _, c := range part {
-			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
-				return false
-			}
-		}
-	}
-
-	return true
-}
-
-// getActiveConnections attempts to get active connections using ss command
-func getActiveConnections(port int) (int, error) {
-	countTCP, tcpErr := countConnectionsForPort("tcp", port)
-	countUDP, udpErr := countConnectionsForPort("udp", port)
-
-	switch {
-	case tcpErr != nil && udpErr != nil:
-		return 0, tcpErr
-	case tcpErr != nil:
-		return countUDP, nil
-	case udpErr != nil:
-		return countTCP, nil
-	default:
-		return countTCP + countUDP, nil
-	}
-}
-
-func countConnectionsForPort(network string, port int) (int, error) {
-	if port <= 0 {
-		return 0, nil
-	}
-
-	args := []string{"-H"}
-	switch network {
-	case "tcp":
-		args = append(args, "-tn")
-	case "udp":
-		args = append(args, "-un")
-	default:
-		return 0, fmt.Errorf("unsupported network %q", network)
-	}
-
-	cmd := exec.Command("ss", args...)
-	output, err := cmd.Output()
-	if err != nil {
-		return 0, err
-	}
-
-	trimmed := strings.TrimSpace(string(output))
-	if trimmed == "" {
-		return 0, nil
-	}
-
-	count := 0
-	suffix := ":" + strconv.Itoa(port)
-	for _, line := range strings.Split(trimmed, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 5 {
-			continue
-		}
-
-		localAddress := fields[3]
-		if !strings.HasSuffix(localAddress, suffix) {
-			continue
-		}
-
-		count++
-	}
-
-	return count, nil
+// BandwidthSample represents a point-in-time bandwidth measurement
+// Kept for backward compatibility but not used in stats-based mode
+type BandwidthSample struct {
+	Timestamp  time.Time
+	TotalBytes int64
+	RXBytes    int64
+	TXBytes    int64
 }

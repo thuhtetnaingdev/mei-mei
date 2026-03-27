@@ -283,3 +283,35 @@ export interface PublicUserResponse {
   singboxProfileUrl: string;
   clashProfileUrl: string;
 }
+
+// Key Verification types for VLESS REALITY Key Verification & Auto-Fix System
+export interface KeyVerificationResult {
+  nodeId: number;
+  nodeName: string;
+  status: "verified" | "mismatch" | "node_unreachable" | "error";
+  publicKeyMatch: boolean;
+  shortIDMatch: boolean;
+  panelPublicKey: string;
+  nodePublicKey: string;
+  panelShortId: string;
+  nodeShortId: string;
+  verifiedAt?: string | null;
+  autoFixTriggered?: boolean;
+  autoFixSuccess?: boolean;
+  error?: string;
+}
+
+export interface NodeKeyStatus {
+  nodeId: number;
+  nodeName: string;
+  realityPublicKey: string;
+  realityShortId: string;
+  realityPrivateKeyHash?: string | null;
+  nodePublicKey?: string | null;
+  nodeShortId?: string | null;
+  publicKeyMatch?: boolean;
+  shortIdMatch?: boolean;
+  lastKeyVerificationAt?: string | null;
+  keyMismatchDetectedAt?: string | null;
+  keyMismatchAutoFixedAt?: string | null;
+}
