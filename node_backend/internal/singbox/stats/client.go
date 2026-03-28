@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	statsservice "github.com/xtls/xray-core/app/stats/command"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -22,9 +23,9 @@ import (
 
 // Security constants for input validation
 const (
-	MaxStatNameLength = 512  // Maximum stat name length to prevent DoS
-	MaxEmailLength    = 254  // RFC 5321 maximum email length
-	MaxErrorLength    = 200  // Maximum error message length to prevent DoS
+	MaxStatNameLength = 512 // Maximum stat name length to prevent DoS
+	MaxEmailLength    = 254 // RFC 5321 maximum email length
+	MaxErrorLength    = 200 // Maximum error message length to prevent DoS
 )
 
 // sanitizeError removes sensitive information from error messages
@@ -73,73 +74,44 @@ type UserTraffic struct {
 type StatsClient struct {
 	mu           sync.RWMutex
 	conn         *grpc.ClientConn
-	statsService StatsServiceClient
+	statsService statsservice.StatsServiceClient
 	address      string
 	connected    bool
 }
 
-// StatsServiceClient is the gRPC client interface for stats service
-type StatsServiceClient interface {
-	GetStats(ctx context.Context, in *GetStatsRequest, opts ...grpc.CallOption) (*GetStatsResponse, error)
-	QueryStats(ctx context.Context, in *QueryStatsRequest, opts ...grpc.CallOption) (*QueryStatsResponse, error)
-}
+const (
+	getStatsMethodPath   = "/v2ray.core.app.stats.command.StatsService/GetStats"
+	queryStatsMethodPath = "/v2ray.core.app.stats.command.StatsService/QueryStats"
+)
 
-// GetStatsRequest requests stats for a specific pattern
-type GetStatsRequest struct {
-	Name   string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Reset_ bool   `protobuf:"varint,2,opt,name=reset,proto3" json:"reset,omitempty"`
-}
-
-// GetStatsResponse contains stats for a single pattern
-type GetStatsResponse struct {
-	Stat *Stat `protobuf:"bytes,1,opt,name=stat,proto3" json:"stat,omitempty"`
-}
-
-// Stat represents a single statistic value
-type Stat struct {
-	Name  string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Value int64  `protobuf:"varint,2,opt,name=value,proto3" json:"value,omitempty"`
-}
-
-// QueryStatsRequest requests stats matching patterns
-type QueryStatsRequest struct {
-	Patterns []string `protobuf:"bytes,1,rep,name=patterns,proto3" json:"patterns,omitempty"`
-	Reset_   bool     `protobuf:"varint,2,opt,name=reset,proto3" json:"reset,omitempty"`
-}
-
-// QueryStatsResponse contains multiple stats
-type QueryStatsResponse struct {
-	Stat []*Stat `protobuf:"bytes,1,rep,name=stat,proto3" json:"stat,omitempty"`
-}
-
-// statsServiceClient implements StatsServiceClient
-type statsServiceClient struct {
+type singboxStatsServiceClient struct {
 	cc grpc.ClientConnInterface
 }
 
-// NewStatsServiceClient creates a new stats service client
-func NewStatsServiceClient(cc grpc.ClientConnInterface) StatsServiceClient {
-	return &statsServiceClient{cc: cc}
+func newSingboxStatsServiceClient(cc grpc.ClientConnInterface) statsservice.StatsServiceClient {
+	return &singboxStatsServiceClient{cc: cc}
 }
 
-// GetStats fetches a single stat by name
-func (c *statsServiceClient) GetStats(ctx context.Context, in *GetStatsRequest, opts ...grpc.CallOption) (*GetStatsResponse, error) {
-	out := new(GetStatsResponse)
-	err := c.cc.Invoke(ctx, "/com.github.xtls.xray_core.app.stats.StatsService/GetStats", in, out, opts...)
+func (c *singboxStatsServiceClient) GetStats(ctx context.Context, in *statsservice.GetStatsRequest, opts ...grpc.CallOption) (*statsservice.GetStatsResponse, error) {
+	out := new(statsservice.GetStatsResponse)
+	err := c.cc.Invoke(ctx, getStatsMethodPath, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// QueryStats fetches multiple stats by pattern
-func (c *statsServiceClient) QueryStats(ctx context.Context, in *QueryStatsRequest, opts ...grpc.CallOption) (*QueryStatsResponse, error) {
-	out := new(QueryStatsResponse)
-	err := c.cc.Invoke(ctx, "/com.github.xtls.xray_core.app.stats.StatsService/QueryStats", in, out, opts...)
+func (c *singboxStatsServiceClient) QueryStats(ctx context.Context, in *statsservice.QueryStatsRequest, opts ...grpc.CallOption) (*statsservice.QueryStatsResponse, error) {
+	out := new(statsservice.QueryStatsResponse)
+	err := c.cc.Invoke(ctx, queryStatsMethodPath, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+func (c *singboxStatsServiceClient) GetSysStats(ctx context.Context, in *statsservice.SysStatsRequest, opts ...grpc.CallOption) (*statsservice.SysStatsResponse, error) {
+	return nil, fmt.Errorf("GetSysStats is not used by meimei")
 }
 
 // NewStatsClient creates a new stats client connected to the specified address
@@ -177,7 +149,7 @@ func (c *StatsClient) Connect() error {
 	}
 
 	c.conn = conn
-	c.statsService = NewStatsServiceClient(conn)
+	c.statsService = newSingboxStatsServiceClient(conn)
 	c.connected = true
 
 	log.Printf("[stats-client] connected to sing-box stats API at %s", c.address)
@@ -255,9 +227,9 @@ func (c *StatsClient) GetUserTraffic(ctx context.Context, reset bool) (map[strin
 
 	// Query all user traffic stats
 	// sing-box uses pattern: "user>>>email>>>traffic>>>downlink" and "user>>>email>>>traffic>>>uplink"
-	resp, err := conn.QueryStats(ctx, &QueryStatsRequest{
-		Patterns: []string{"user>>>"},
-		Reset_:   reset,
+	resp, err := conn.QueryStats(ctx, &statsservice.QueryStatsRequest{
+		Pattern: "user>>>",
+		Reset_:  reset,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("query stats failed: %w", err)

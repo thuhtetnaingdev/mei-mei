@@ -502,44 +502,78 @@ func (s *ConfigService) restoreTrackedUsersFromConfig() {
 		return
 	}
 
-	seen := make(map[string]bool)
-	trackedUsers := make([]struct {
+	type trackedUser struct {
 		UUID             string
 		Email            string
 		Enabled          bool
 		BandwidthLimitGB int64
-	}, 0)
+	}
+
+	byEmail := make(map[string]*trackedUser)
 
 	for _, inbound := range cfg.Inbounds {
 		for _, user := range inbound.Users {
-			uuid := user.UUID
-			if uuid == "" {
-				uuid = user.Password
-			}
-			if uuid == "" || seen[uuid] {
+			email := strings.TrimSpace(user.Name)
+			if email == "" {
 				continue
 			}
 
-			seen[uuid] = true
-			trackedUsers = append(trackedUsers, struct {
-				UUID             string
-				Email            string
-				Enabled          bool
-				BandwidthLimitGB int64
-			}{
-				UUID:             uuid,
-				Email:            user.Name,
-				Enabled:          true,
-				BandwidthLimitGB: 0,
-			})
+			entry, exists := byEmail[email]
+			if !exists {
+				entry = &trackedUser{
+					Email:            email,
+					Enabled:          true,
+					BandwidthLimitGB: 0,
+				}
+				byEmail[email] = entry
+			}
+
+			// Prefer protocol entries that include the real user UUID, but fall
+			// back to password for inbounds like Shadowsocks that only persist the
+			// per-user identifier there.
+			if entry.UUID == "" {
+				if uuid := strings.TrimSpace(user.UUID); uuid != "" {
+					entry.UUID = uuid
+				} else if password := strings.TrimSpace(user.Password); password != "" {
+					entry.UUID = password
+				}
+			}
 		}
+	}
+
+	trackedUsers := make([]trackedUser, 0, len(byEmail))
+	for _, user := range byEmail {
+		if user.UUID == "" {
+			continue
+		}
+		trackedUsers = append(trackedUsers, *user)
 	}
 
 	if len(trackedUsers) == 0 {
 		return
 	}
 
-	s.bandwidthTracker.UpdateActiveUsers(trackedUsers)
+	trackerUsers := make([]struct {
+		UUID             string
+		Email            string
+		Enabled          bool
+		BandwidthLimitGB int64
+	}, 0, len(trackedUsers))
+	for _, user := range trackedUsers {
+		trackerUsers = append(trackerUsers, struct {
+			UUID             string
+			Email            string
+			Enabled          bool
+			BandwidthLimitGB int64
+		}{
+			UUID:             user.UUID,
+			Email:            user.Email,
+			Enabled:          user.Enabled,
+			BandwidthLimitGB: user.BandwidthLimitGB,
+		})
+	}
+
+	s.bandwidthTracker.UpdateActiveUsers(trackerUsers)
 
 	s.mu.Lock()
 	s.activeUsers = len(trackedUsers)
