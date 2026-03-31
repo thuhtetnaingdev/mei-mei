@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,12 +13,20 @@ import (
 	"panel_backend/internal/config"
 	"panel_backend/internal/db"
 	"panel_backend/internal/services"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "reset-accounting" {
+		runResetAccounting(os.Args[2:])
+		return
+	}
+
 	cfg := config.Load()
 
 	database, err := db.Connect(cfg.DatabasePath)
@@ -117,4 +126,47 @@ func main() {
 	}
 
 	<-shutdownDone
+}
+
+func runResetAccounting(args []string) {
+	resetFlags := flag.NewFlagSet("reset-accounting", flag.ExitOnError)
+	assumeYes := resetFlags.Bool("yes", false, "confirm destructive accounting reset")
+	databasePath := resetFlags.String("database-path", "", "override database path")
+	resetFlags.Parse(args)
+
+	if !*assumeYes {
+		log.Fatal("refusing to reset accounting without --yes")
+	}
+
+	_ = godotenv.Load()
+	if *databasePath == "" {
+		*databasePath = os.Getenv("DATABASE_PATH")
+	}
+	if *databasePath == "" {
+		*databasePath = "./panel.sqlite3"
+	}
+
+	if err := os.MkdirAll(filepath.Dir(*databasePath), 0o755); err != nil && filepath.Dir(*databasePath) != "." {
+		log.Fatalf("failed to create database directory: %v", err)
+	}
+
+	database, err := db.Connect(*databasePath)
+	if err != nil {
+		log.Fatalf("failed to connect database: %v", err)
+	}
+
+	summary, err := services.ResetAccounting(database)
+	if err != nil {
+		log.Fatalf("failed to reset accounting: %v", err)
+	}
+
+	fmt.Printf("accounting reset complete\n")
+	fmt.Printf("users reset: %d\n", summary.UsersReset)
+	fmt.Printf("nodes reset: %d\n", summary.NodesReset)
+	fmt.Printf("miners reset: %d\n", summary.MinersReset)
+	fmt.Printf("allocations reset: %d\n", summary.AllocationsReset)
+	fmt.Printf("node usage entries deleted: %d\n", summary.NodeUsageEntriesDeleted)
+	fmt.Printf("miner rewards deleted: %d\n", summary.MinerRewardsDeleted)
+	fmt.Printf("mint events deleted: %d\n", summary.MintEventsDeleted)
+	fmt.Printf("mint transfers deleted: %d\n", summary.MintTransfersDeleted)
 }

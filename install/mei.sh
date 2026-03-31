@@ -10,9 +10,11 @@ print_usage() {
   cat <<'EOF'
 Usage:
   mei uninstall [--yes]
+  mei reset [--yes]
 
 Commands:
   uninstall   Remove the installed Meimei panel service, files, and database
+  reset       Clear bandwidth/accounting state, user tokens, miner credits, and mint balances
   help        Show this help message
 
 Options:
@@ -179,6 +181,88 @@ uninstall_panel() {
   echo "Meimei panel uninstalled."
 }
 
+confirm_reset() {
+  local install_dir="$1"
+  local env_file="$2"
+  local database_path="$3"
+
+  if [[ ! -t 0 ]]; then
+    echo "Refusing to reset accounting from a non-interactive shell without --yes." >&2
+    exit 1
+  fi
+
+  echo "This will permanently clear Meimei accounting state:"
+  echo "  install dir: ${install_dir}"
+  if [[ -n "$env_file" ]]; then
+    echo "  env file: ${env_file}"
+  fi
+  if [[ -n "$database_path" ]]; then
+    echo "  database: ${database_path}"
+  fi
+  echo "  effects: node/user bandwidth, user tokens, miner rewards, Mei minted, admin wallet"
+  printf 'Type "reset" to continue: '
+
+  local confirmation=""
+  read -r confirmation
+  if [[ "$confirmation" != "reset" ]]; then
+    echo "Reset cancelled."
+    exit 1
+  fi
+}
+
+reset_panel() {
+  local assume_yes="false"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --yes)
+        assume_yes="true"
+        ;;
+      -h|--help)
+        print_usage
+        exit 0
+        ;;
+      *)
+        echo "Unknown option for reset: $1" >&2
+        print_usage >&2
+        exit 1
+        ;;
+    esac
+    shift
+  done
+
+  local install_dir service_name env_file database_path backend_bin
+  install_dir="$(resolve_setting "${MEIMEI_PANEL_DIR:-}" "INSTALL_DIR" "$DEFAULT_INSTALL_DIR")"
+  service_name="$(resolve_setting "${MEIMEI_PANEL_SERVICE:-}" "SERVICE_NAME" "$DEFAULT_SERVICE_NAME")"
+  env_file="$(resolve_setting "${MEIMEI_PANEL_ENV_FILE:-}" "ENV_FILE" "${install_dir}/.env")"
+  backend_bin="${install_dir}/panel_backend"
+  database_path="$(read_config_value "$env_file" "DATABASE_PATH" 2>/dev/null || true)"
+
+  if [[ ! -x "$backend_bin" ]]; then
+    echo "panel backend binary not found at ${backend_bin}" >&2
+    exit 1
+  fi
+
+  if [[ "$assume_yes" != "true" ]]; then
+    confirm_reset "$install_dir" "$env_file" "$database_path"
+  fi
+
+  if [[ -f "$env_file" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$env_file"
+    set +a
+  fi
+
+  if [[ -n "$database_path" ]]; then
+    run_as_root "$backend_bin" reset-accounting --yes --database-path "$database_path"
+  else
+    run_as_root "$backend_bin" reset-accounting --yes
+  fi
+
+  echo "Meimei accounting reset complete."
+}
+
 main() {
   local command="${1:-help}"
 
@@ -186,6 +270,10 @@ main() {
     uninstall)
       shift
       uninstall_panel "$@"
+      ;;
+    reset)
+      shift
+      reset_panel "$@"
       ;;
     help|-h|--help)
       print_usage
