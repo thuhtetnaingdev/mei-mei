@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"panel_backend/internal/models"
 	"sort"
 	"strconv"
@@ -99,11 +100,11 @@ type UserListOptions struct {
 
 // ValidSortFields defines allowed sort fields to prevent SQL injection
 var ValidSortFields = map[string]bool{
-	"createdAt":     true,
-	"updatedAt":     true,
-	"email":         true,
-	"tokenBalance":  true,
-	"bandwidthUsed": true,
+	"createdAt":      true,
+	"updatedAt":      true,
+	"email":          true,
+	"tokenBalance":   true,
+	"bandwidthUsed":  true,
 	"bandwidthLimit": true,
 }
 
@@ -427,6 +428,8 @@ func (s *UserService) GetPublicUserByUUID(uuid string, basePublicURL string) (*m
 		publicUser.SubscriptionURL = basePublicURL + "/subscription/" + uuid
 		publicUser.SingboxProfileURL = basePublicURL + "/profiles/singbox/" + uuid
 		publicUser.ClashProfileURL = basePublicURL + "/profiles/singbox/" + uuid + "?format=clash"
+		publicUser.SingboxImportURL = "sing-box://import-remote-profile?url=" + url.QueryEscape(publicUser.SingboxProfileURL) + "&name=" + url.QueryEscape(user.Email)
+		publicUser.HiddifyImportURL = "hiddify://import/" + publicUser.SingboxProfileURL + "#" + url.QueryEscape(user.Email)
 	}
 
 	return publicUser, nil

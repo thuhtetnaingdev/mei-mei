@@ -26,6 +26,7 @@ export function PublicUserPage() {
   const [qrLoading, setQrLoading] = useState(false);
   const [copiedKey, setCopiedKey] = useState("");
   const [showQrDialog, setShowQrDialog] = useState(false);
+  const [qrTitle, setQrTitle] = useState("Sing-Box");
 
   const loadUser = async (userUuid: string) => {
     setLoading(true);
@@ -34,8 +35,8 @@ export function PublicUserPage() {
       const response = await api.get<PublicUserResponse>(`/api/public/users/${userUuid}`);
       setUser(response.data);
       
-      // Generate QR code for the singbox import URL
-      const importUrl = response.data.singboxProfileUrl;
+      // Generate QR code for the sing-box remote import URI
+      const importUrl = response.data.singboxImportUrl || response.data.singboxProfileUrl;
       if (importUrl) {
         setQrLoading(true);
         const qr = await QRCode.toDataURL(importUrl, {
@@ -91,6 +92,25 @@ export function PublicUserPage() {
       setTimeout(() => setCopiedKey(""), 2000);
     } catch {
       // Silent fail for copy
+    }
+  };
+
+  const openQrDialog = async (value: string, title: string) => {
+    if (!value) {
+      return;
+    }
+
+    setQrTitle(title);
+    setShowQrDialog(true);
+    setQrLoading(true);
+    try {
+      const qr = await QRCode.toDataURL(value, {
+        width: 280,
+        margin: 1
+      });
+      setQrCodeUrl(qr);
+    } finally {
+      setQrLoading(false);
     }
   };
 
@@ -274,20 +294,45 @@ export function PublicUserPage() {
                 <div className="flex items-center justify-between">
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-white">Sing-Box Import URL</p>
-                    <p className="mt-0.5 truncate text-xs text-slate-400">{user.singboxProfileUrl}</p>
+                    <p className="mt-0.5 truncate text-xs text-slate-400">{user.singboxImportUrl || user.singboxProfileUrl}</p>
                   </div>
                   <div className="ml-3 flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => copyText(user.singboxProfileUrl || "", "singbox-import")}
+                      onClick={() => copyText(user.singboxImportUrl || user.singboxProfileUrl || "", "singbox-import")}
                       className="rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/15"
                     >
                       {copiedKey === "singbox-import" ? "Copied!" : "Copy"}
                     </button>
                     <button
                       type="button"
-                      onClick={() => setShowQrDialog(true)}
+                      onClick={() => void openQrDialog(user.singboxImportUrl || user.singboxProfileUrl || "", "Sing-Box")}
                       className="rounded-lg bg-sky-500/15 px-3 py-1.5 text-xs font-semibold text-sky-400 transition hover:bg-sky-500/25"
+                    >
+                      <QrCode className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-slate-950/35 p-3">
+                <div className="flex items-center justify-between">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-white">Hiddify Import URL</p>
+                    <p className="mt-0.5 truncate text-xs text-slate-400">{user.hiddifyImportUrl || user.singboxProfileUrl}</p>
+                  </div>
+                  <div className="ml-3 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => copyText(user.hiddifyImportUrl || user.singboxProfileUrl || "", "hiddify-import")}
+                      className="rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/15"
+                    >
+                      {copiedKey === "hiddify-import" ? "Copied!" : "Copy"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void openQrDialog(user.hiddifyImportUrl || user.singboxProfileUrl || "", "Hiddify")}
+                      className="rounded-lg bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-400 transition hover:bg-emerald-500/25"
                     >
                       <QrCode className="h-3.5 w-3.5" />
                     </button>
@@ -326,9 +371,9 @@ export function PublicUserPage() {
           {/* Quick Actions */}
           <section className="panel-surface rounded-3xl p-4 sm:p-6">
             <h3 className="font-display text-lg font-bold text-white">Quick Actions</h3>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
               <a
-                href={user.singboxProfileUrl || "#"}
+                href={user.singboxImportUrl || user.singboxProfileUrl || "#"}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center justify-center gap-2 rounded-2xl bg-sky-500/15 px-4 py-3 text-sm font-semibold text-sky-400 transition hover:bg-sky-500/25"
@@ -345,6 +390,15 @@ export function PublicUserPage() {
                 <Link2 className="h-4 w-4" />
                 <span>Open Clash Profile</span>
               </a>
+              <a
+                href={user.hiddifyImportUrl || user.singboxProfileUrl || "#"}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-500/15 px-4 py-3 text-sm font-semibold text-emerald-400 transition hover:bg-emerald-500/25"
+              >
+                <Link2 className="h-4 w-4" />
+                <span>Open Hiddify Import</span>
+              </a>
             </div>
           </section>
 
@@ -354,6 +408,9 @@ export function PublicUserPage() {
             <div className="mt-3 space-y-2 text-sm text-slate-400">
               <p>
                 <strong className="text-slate-300">For Sing-Box:</strong> Copy the Sing-Box Import URL and use the "Import Remote Profile" feature in your Sing-Box client.
+              </p>
+              <p>
+                <strong className="text-slate-300">For Hiddify:</strong> Open the Hiddify Import URL to import the same remote JSON profile into Hiddify.
               </p>
               <p>
                 <strong className="text-slate-300">For Clash:</strong> Copy the Clash Profile URL and import it into your Clash client, or download the YAML file directly.
@@ -392,7 +449,7 @@ export function PublicUserPage() {
               ) : null}
             </div>
             <p className="mt-4 text-center text-sm text-slate-400">
-              Scan this QR code with your Sing-Box mobile app to import your subscription.
+              Scan this QR code with your {qrTitle} mobile app to import your subscription.
             </p>
           </div>
         </div>

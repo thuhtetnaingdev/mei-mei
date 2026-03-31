@@ -283,6 +283,8 @@ export interface PublicUserResponse {
   bandwidthRemainingGb: number;
   usagePercentage: number;
   subscriptionUrl: string;
+  singboxImportUrl: string;
+  hiddifyImportUrl: string;
   singboxProfileUrl: string;
   clashProfileUrl: string;
 }
