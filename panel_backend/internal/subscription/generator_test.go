@@ -82,6 +82,13 @@ func TestGenerateSingboxProfileIncludesMatchingShadowsocksOutbound(t *testing.T)
 		if outbound["password"] != expectedPassword {
 			t.Fatalf("unexpected shadowsocks password: got %v want %v", outbound["password"], expectedPassword)
 		}
+		multiplex, ok := outbound["multiplex"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected shadowsocks outbound to include multiplex settings, got %#v", outbound["multiplex"])
+		}
+		if multiplex["enabled"] != false {
+			t.Fatalf("expected shadowsocks outbound multiplex.enabled=false, got %v", multiplex["enabled"])
+		}
 		return
 	}
 

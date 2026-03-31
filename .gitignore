@@ -76,3 +76,4 @@ temp/
 *.crt
 *.p12
 *.pfx
+.aider*

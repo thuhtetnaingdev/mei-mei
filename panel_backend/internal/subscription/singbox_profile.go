@@ -99,7 +99,7 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 				"password":    shadowsocks.Password,
 				"network":     "tcp",
 				"multiplex": map[string]interface{}{
-					"enabled": true,
+					"enabled": false,
 				},
 			})
 		}
@@ -142,7 +142,7 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 				"address":                  []string{"172.19.0.1/30", "fdfe:dcba:9876::1/126"},
 				"auto_route":               true,
 				"endpoint_independent_nat": false,
-				"mtu":                      9000,
+				"mtu":                      1380,
 				"platform": map[string]interface{}{
 					"http_proxy": map[string]interface{}{
 						"enabled":     true,
