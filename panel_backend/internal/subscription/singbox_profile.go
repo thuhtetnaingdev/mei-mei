@@ -136,6 +136,16 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 	}
 
 	return map[string]interface{}{
+		"dns": map[string]interface{}{
+			"servers": []map[string]interface{}{
+				{
+					"type": "local",
+					"tag":  "local-dns",
+				},
+			},
+			"final":    "local-dns",
+			"strategy": "prefer_ipv4",
+		},
 		"inbounds": []map[string]interface{}{
 			{
 				"type":                     "tun",
@@ -151,7 +161,7 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 					},
 				},
 				"stack":        "system",
-				"strict_route": false,
+				"strict_route": true,
 			},
 			{
 				"type":        "mixed",
@@ -162,20 +172,63 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 		},
 		"outbounds": outbounds,
 		"route": map[string]interface{}{
-			"auto_detect_interface": true,
-			"final":                 "proxy",
-			"rules": []map[string]interface{}{
-				{
-					"action": "sniff",
-				},
-				{
-					"action":     "route",
-					"clash_mode": "Direct",
-					"outbound":   "direct",
-				},
-			},
+			"auto_detect_interface":   true,
+			"default_domain_resolver": "local-dns",
+			"final":                   "proxy",
+			"rules":                   buildSingboxRouteRules(settings),
 		},
 	}
+}
+
+func buildSingboxRouteRules(settings services.ProtocolSettings) []map[string]interface{} {
+	rules := []map[string]interface{}{
+		{
+			"action": "sniff",
+		},
+		{
+			"type": "logical",
+			"mode": "or",
+			"rules": []map[string]interface{}{
+				{
+					"protocol": "dns",
+				},
+				{
+					"port": 53,
+				},
+			},
+			"action": "hijack-dns",
+		},
+	}
+
+	if len(settings.DirectPackages) > 0 {
+		rules = append(rules, map[string]interface{}{
+			"action":       "route",
+			"package_name": settings.DirectPackages,
+			"outbound":     "direct",
+		})
+	}
+	if len(settings.DirectDomains) > 0 {
+		rules = append(rules, map[string]interface{}{
+			"action":        "route",
+			"domain_suffix": settings.DirectDomains,
+			"outbound":      "direct",
+		})
+	}
+	if len(settings.ProxyDomains) > 0 {
+		rules = append(rules, map[string]interface{}{
+			"action":        "route",
+			"domain_suffix": settings.ProxyDomains,
+			"outbound":      "proxy",
+		})
+	}
+
+	rules = append(rules, map[string]interface{}{
+		"action":     "route",
+		"clash_mode": "Direct",
+		"outbound":   "direct",
+	})
+
+	return rules
 }
 
 func buildClashProfileConfig(user models.User, nodes []models.Node, settings services.ProtocolSettings) map[string]interface{} {
@@ -282,7 +335,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		"mode":       "rule",
 		"log-level":  "info",
 		"ipv6":       true,
-		"proxies": proxies,
+		"proxies":    proxies,
 		"proxy-groups": []map[string]interface{}{
 			{
 				"name":      "AUTO",

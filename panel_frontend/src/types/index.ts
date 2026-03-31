@@ -179,6 +179,9 @@ export interface DistributionSettings {
 export interface ProtocolSettings {
   realitySnis: string[];
   hysteria2Masquerades: string[];
+  directPackages: string[];
+  directDomains: string[];
+  proxyDomains: string[];
 }
 
 export interface ProtocolSettingsUpdateResponse extends ProtocolSettings {

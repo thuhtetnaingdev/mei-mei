@@ -35,7 +35,10 @@ export function SettingsPage() {
   });
   const [protocolSettings, setProtocolSettings] = useState<ProtocolSettings>({
     realitySnis: ["www.cloudflare.com"],
-    hysteria2Masquerades: []
+    hysteria2Masquerades: [],
+    directPackages: [],
+    directDomains: [],
+    proxyDomains: []
   });
   const [status, setStatus] = useState("");
   const [protocolStatus, setProtocolStatus] = useState("");
@@ -54,7 +57,10 @@ export function SettingsPage() {
         setDistributionSettings(distributionResponse.data);
         setProtocolSettings({
           realitySnis: protocolResponse.data.realitySnis.length ? protocolResponse.data.realitySnis : [""],
-          hysteria2Masquerades: protocolResponse.data.hysteria2Masquerades
+          hysteria2Masquerades: protocolResponse.data.hysteria2Masquerades,
+          directPackages: protocolResponse.data.directPackages,
+          directDomains: protocolResponse.data.directDomains,
+          proxyDomains: protocolResponse.data.proxyDomains
         });
       })
       .catch(() => undefined);
@@ -102,13 +108,19 @@ export function SettingsPage() {
     try {
       const payload: ProtocolSettings = {
         realitySnis: protocolSettings.realitySnis.map((value) => value.trim()).filter(Boolean),
-        hysteria2Masquerades: protocolSettings.hysteria2Masquerades.map((value) => value.trim()).filter(Boolean)
+        hysteria2Masquerades: protocolSettings.hysteria2Masquerades.map((value) => value.trim()).filter(Boolean),
+        directPackages: protocolSettings.directPackages.map((value) => value.trim()).filter(Boolean),
+        directDomains: protocolSettings.directDomains.map((value) => value.trim()).filter(Boolean),
+        proxyDomains: protocolSettings.proxyDomains.map((value) => value.trim()).filter(Boolean)
       };
 
       const response = await api.put<ProtocolSettingsUpdateResponse>("/settings/protocols", payload);
       setProtocolSettings({
         realitySnis: response.data.realitySnis.length ? response.data.realitySnis : [""],
-        hysteria2Masquerades: response.data.hysteria2Masquerades
+        hysteria2Masquerades: response.data.hysteria2Masquerades,
+        directPackages: response.data.directPackages,
+        directDomains: response.data.directDomains,
+        proxyDomains: response.data.proxyDomains
       });
       setProtocolStatus(
         response.data.syncError
@@ -246,6 +258,154 @@ export function SettingsPage() {
             </div>
           </div>
         </div>
+        <div className="mt-4 rounded-3xl border border-fuchsia-400/20 bg-fuchsia-400/5 p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="metric-kicker text-fuchsia-200">Sing-box Rules</p>
+              <h3 className="mt-2 font-display text-xl font-semibold text-white">Client routing lists</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-300">
+                These rules are written into the generated sing-box subscription profile. Use them to send Android apps or domains
+                through `direct` or force domains back through the `proxy` selector without editing client JSON by hand.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 xl:grid-cols-3">
+            <div className="rounded-3xl border border-sky-400/20 bg-sky-400/5 p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="metric-kicker text-sky-200">Direct apps</p>
+                  <h4 className="mt-2 font-display text-lg font-semibold text-white">Android package names</h4>
+                  <p className="mt-2 text-sm leading-6 text-slate-300">
+                    Matching Android package names go straight out through `direct`. Good for games, banking apps, or region-locked
+                    tools that dislike VPN routing.
+                  </p>
+                </div>
+                <button type="button" onClick={() => addListValue("directPackages")} className="btn-secondary shrink-0 gap-1.5 px-3 py-2 text-sm">
+                  <Plus className="h-3.5 w-3.5" />
+                  Add
+                </button>
+              </div>
+              <div className="mt-4 space-y-3">
+                {protocolSettings.directPackages.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-white/10 px-4 py-5 text-sm text-slate-400">
+                    No direct app rules yet. Example: `com.mobile.legends`
+                  </div>
+                ) : null}
+                {protocolSettings.directPackages.map((value, index) => (
+                  <div key={`direct-package-${index}`} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/30 p-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-sky-400/10 text-sm font-semibold text-sky-200">
+                      {index + 1}
+                    </div>
+                    <input
+                      value={value}
+                      onChange={(event) => updateListValue("directPackages", index, event.target.value)}
+                      className="input-shell flex-1"
+                      placeholder="com.mobile.legends"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeListValue("directPackages", index)}
+                      className="rounded-2xl border border-rose-400/20 bg-rose-400/10 p-2.5 text-rose-200 transition hover:border-rose-300/40 hover:bg-rose-400/20"
+                      aria-label={`Remove direct app rule ${index + 1}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-amber-400/20 bg-amber-400/5 p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="metric-kicker text-amber-200">Direct domains</p>
+                  <h4 className="mt-2 font-display text-lg font-semibold text-white">Domain suffix list</h4>
+                  <p className="mt-2 text-sm leading-6 text-slate-300">
+                    Matching domains bypass the proxy and use `direct`. Enter suffixes like `mongodb.net` or `example.com`, not full
+                    URLs.
+                  </p>
+                </div>
+                <button type="button" onClick={() => addListValue("directDomains")} className="btn-secondary shrink-0 gap-1.5 px-3 py-2 text-sm">
+                  <Plus className="h-3.5 w-3.5" />
+                  Add
+                </button>
+              </div>
+              <div className="mt-4 space-y-3">
+                {protocolSettings.directDomains.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-white/10 px-4 py-5 text-sm text-slate-400">
+                    No direct domain rules yet. Example: `mongodb.net`
+                  </div>
+                ) : null}
+                {protocolSettings.directDomains.map((value, index) => (
+                  <div key={`direct-domain-${index}`} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/30 p-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-amber-400/10 text-sm font-semibold text-amber-200">
+                      {index + 1}
+                    </div>
+                    <input
+                      value={value}
+                      onChange={(event) => updateListValue("directDomains", index, event.target.value)}
+                      className="input-shell flex-1"
+                      placeholder="mongodb.net"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeListValue("directDomains", index)}
+                      className="rounded-2xl border border-rose-400/20 bg-rose-400/10 p-2.5 text-rose-200 transition hover:border-rose-300/40 hover:bg-rose-400/20"
+                      aria-label={`Remove direct domain rule ${index + 1}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-rose-400/20 bg-rose-400/5 p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="metric-kicker text-rose-200">Proxy domains</p>
+                  <h4 className="mt-2 font-display text-lg font-semibold text-white">Force through proxy</h4>
+                  <p className="mt-2 text-sm leading-6 text-slate-300">
+                    Matching domains are pinned to the `proxy` selector even when the rest of your client uses direct routing.
+                  </p>
+                </div>
+                <button type="button" onClick={() => addListValue("proxyDomains")} className="btn-secondary shrink-0 gap-1.5 px-3 py-2 text-sm">
+                  <Plus className="h-3.5 w-3.5" />
+                  Add
+                </button>
+              </div>
+              <div className="mt-4 space-y-3">
+                {protocolSettings.proxyDomains.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-white/10 px-4 py-5 text-sm text-slate-400">
+                    No forced proxy domains yet. Example: `facebook.com`
+                  </div>
+                ) : null}
+                {protocolSettings.proxyDomains.map((value, index) => (
+                  <div key={`proxy-domain-${index}`} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/30 p-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-rose-400/10 text-sm font-semibold text-rose-200">
+                      {index + 1}
+                    </div>
+                    <input
+                      value={value}
+                      onChange={(event) => updateListValue("proxyDomains", index, event.target.value)}
+                      className="input-shell flex-1"
+                      placeholder="facebook.com"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeListValue("proxyDomains", index)}
+                      className="rounded-2xl border border-rose-400/20 bg-rose-400/10 p-2.5 text-rose-200 transition hover:border-rose-300/40 hover:bg-rose-400/20"
+                      aria-label={`Remove proxy domain rule ${index + 1}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
         <div className="mt-4 grid gap-3 md:grid-cols-3">
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">
             Reality inbounds per node: {protocolSettings.realitySnis.map((value) => value.trim()).filter(Boolean).length}
@@ -254,7 +414,7 @@ export function SettingsPage() {
             Hysteria2 inbounds per node: {protocolSettings.hysteria2Masquerades.map((value) => value.trim()).filter(Boolean).length}
           </div>
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">
-            Ports are backend-assigned, stable, and randomized per generated inbound.
+            Route rules in profile: {protocolSettings.directPackages.length + protocolSettings.directDomains.length + protocolSettings.proxyDomains.length}
           </div>
         </div>
         {protocolError ? <p className="mt-4 text-sm text-rose-300">{protocolError}</p> : null}

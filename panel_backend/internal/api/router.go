@@ -22,18 +22,18 @@ import (
 )
 
 type Handler struct {
-	cfg                            config.Config
-	jwt                            *auth.JWTManager
-	adminService                   *services.AdminService
-	userService                    *services.UserService
-	minerService                   *services.MinerService
-	nodeService                    *services.NodeService
-	mintPoolService                *services.MintPoolService
-	bandwidthReportService         *services.BandwidthReportService
-	bandwidthCollector             *services.BandwidthCollectorService
-	userClassificationService      *services.UserClassificationService
-	userClassificationScheduler    *services.UserClassificationScheduler
-	realityKeyVerificationService  *services.RealityKeyVerificationService
+	cfg                             config.Config
+	jwt                             *auth.JWTManager
+	adminService                    *services.AdminService
+	userService                     *services.UserService
+	minerService                    *services.MinerService
+	nodeService                     *services.NodeService
+	mintPoolService                 *services.MintPoolService
+	bandwidthReportService          *services.BandwidthReportService
+	bandwidthCollector              *services.BandwidthCollectorService
+	userClassificationService       *services.UserClassificationService
+	userClassificationScheduler     *services.UserClassificationScheduler
+	realityKeyVerificationService   *services.RealityKeyVerificationService
 	realityKeyVerificationScheduler *services.RealityKeyVerificationScheduler
 }
 
@@ -65,18 +65,18 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 	}))
 
 	handler := &Handler{
-		cfg:                            cfg,
-		jwt:                            auth.NewJWTManager(cfg.JWTSecret),
-		adminService:                   services.NewAdminService(db, cfg.AdminUsername, cfg.AdminPassword),
-		userService:                    userService,
-		minerService:                   services.NewMinerService(db),
-		mintPoolService:                services.NewMintPoolService(db),
-		bandwidthReportService:         services.NewBandwidthReportService(db),
-		nodeService:                    nodeService,
-		bandwidthCollector:             bandwidthCollector,
-		userClassificationService:      userClassificationService,
-		userClassificationScheduler:    userClassificationScheduler,
-		realityKeyVerificationService:  realityKeyVerificationService,
+		cfg:                             cfg,
+		jwt:                             auth.NewJWTManager(cfg.JWTSecret),
+		adminService:                    services.NewAdminService(db, cfg.AdminUsername, cfg.AdminPassword),
+		userService:                     userService,
+		minerService:                    services.NewMinerService(db),
+		mintPoolService:                 services.NewMintPoolService(db),
+		bandwidthReportService:          services.NewBandwidthReportService(db),
+		nodeService:                     nodeService,
+		bandwidthCollector:              bandwidthCollector,
+		userClassificationService:       userClassificationService,
+		userClassificationScheduler:     userClassificationScheduler,
+		realityKeyVerificationService:   realityKeyVerificationService,
 		realityKeyVerificationScheduler: realityKeyVerificationScheduler,
 	}
 
@@ -333,6 +333,9 @@ func (h *Handler) updateProtocolSettings(c *gin.Context) {
 	response := services.ProtocolSettingsUpdateResponse{
 		RealitySNIs:          settings.RealitySNIs,
 		Hysteria2Masquerades: settings.Hysteria2Masquerades,
+		DirectPackages:       settings.DirectPackages,
+		DirectDomains:        settings.DirectDomains,
+		ProxyDomains:         settings.ProxyDomains,
 	}
 
 	activeUsers, err := h.userService.ActiveUsers()

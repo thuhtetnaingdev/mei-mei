@@ -11,6 +11,9 @@ type AdminSetting struct {
 	ReservePoolPercent float64   `json:"reservePoolPercent"`
 	RealitySNIsJSON    string    `json:"-" gorm:"type:text"`
 	Hysteria2ProxyJSON string    `json:"-" gorm:"type:text"`
+	DirectPackagesJSON string    `json:"-" gorm:"type:text"`
+	DirectDomainsJSON  string    `json:"-" gorm:"type:text"`
+	ProxyDomainsJSON   string    `json:"-" gorm:"type:text"`
 	CreatedAt          time.Time `json:"createdAt"`
 	UpdatedAt          time.Time `json:"updatedAt"`
 }
