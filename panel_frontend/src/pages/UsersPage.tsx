@@ -8,6 +8,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { SectionCard } from "../components/SectionCard";
 import { Pagination } from "../components/Pagination";
 import { UserFilters } from "../components/UserFilters";
+import { localizeSubscriptionLinks } from "../utils/subscriptionLinks";
 import type { MintPoolSnapshot, Node, User, UserBandwidthAllocation, UserClassificationStatus, UserClassificationStats, UserListOptions, UserListResult, PaginationMeta } from "../types";
 
 interface SubscriptionResponse {
@@ -552,9 +553,10 @@ export function UsersPage() {
 
     try {
       const response = await api.get<SubscriptionResponse>(`/subscription/${user.id}`);
-      setSelectedAccess(response.data);
+      const localizedAccess = localizeSubscriptionLinks(response.data);
+      setSelectedAccess(localizedAccess);
 
-      const qrPayload = response.data.singboxImportUrl || response.data.remoteProfileUrl || response.data.url;
+      const qrPayload = localizedAccess.singboxImportUrl || localizedAccess.remoteProfileUrl || localizedAccess.url;
       if (qrPayload) {
         const qr = await QRCode.toDataURL(qrPayload, {
           width: 280,

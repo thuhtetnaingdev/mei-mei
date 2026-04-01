@@ -4,6 +4,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import QRCode from "qrcode";
 import api from "../api/client";
 import type { PublicUserResponse } from "../types";
+import { localizeSubscriptionLinks } from "../utils/subscriptionLinks";
 
 const formatDate = (value?: string | null) => {
   if (!value) {
@@ -33,10 +34,11 @@ export function PublicUserPage() {
     setError("");
     try {
       const response = await api.get<PublicUserResponse>(`/api/public/users/${userUuid}`);
-      setUser(response.data);
+      const localizedUser = localizeSubscriptionLinks(response.data);
+      setUser(localizedUser);
       
       // Generate QR code for the sing-box remote import URI
-      const importUrl = response.data.singboxImportUrl || response.data.singboxProfileUrl;
+      const importUrl = localizedUser.singboxImportUrl || localizedUser.singboxProfileUrl;
       if (importUrl) {
         setQrLoading(true);
         const qr = await QRCode.toDataURL(importUrl, {
