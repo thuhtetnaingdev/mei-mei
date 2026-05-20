@@ -6,6 +6,8 @@ VERSION="${MEIMEI_VERSION:-latest}"
 INSTALL_DIR="${MEIMEI_PROXY_DIR:-/opt/meimei-proxy}"
 PROXY_PORT="${MEIMEI_PROXY_PORT:-9091}"
 SERVICE_NAME="${MEIMEI_PROXY_SERVICE:-meimei-proxy}"
+PROXY_URL="${MEIMEI_PROXY_URL:-}"
+MAP_TOKEN="${MEIMEI_MAP_TOKEN:-}"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
