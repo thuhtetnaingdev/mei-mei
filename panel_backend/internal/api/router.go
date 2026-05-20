@@ -936,6 +936,13 @@ func (h *Handler) getSubscription(c *gin.Context) {
 		return
 	}
 
+	header := "upload=0; download=" + strconv.FormatInt(user.BandwidthUsedBytes, 10)
+	header += "; total=" + strconv.FormatInt(user.BandwidthLimitGB*1024*1024*1024, 10)
+	if user.ExpiresAt != nil {
+		header += "; expire=" + strconv.FormatInt(user.ExpiresAt.Unix(), 10)
+	}
+	c.Header("Subscription-Userinfo", header)
+
 	c.JSON(http.StatusOK, gin.H{
 		"userId":           user.ID,
 		"uuid":             user.UUID,

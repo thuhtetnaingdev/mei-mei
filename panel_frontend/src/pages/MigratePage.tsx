@@ -19,7 +19,7 @@ interface MigrationImportResult {
   enabled: boolean;
 }
 
-const defaultSubscriptionUrl = "http://192.3.153.20:2096/sub/Tiffiny?format=json";
+const defaultSubscriptionUrl = "";
 const bytesPerGB = 1024 ** 3;
 
 const formatBytes = (bytes: number) => {
@@ -139,7 +139,7 @@ export function MigratePage() {
                   value={subscriptionUrl}
                   onChange={(event) => setSubscriptionUrl(event.target.value)}
                   className="input-shell min-w-0"
-                  placeholder={defaultSubscriptionUrl}
+                  placeholder="https://example.com:2096/sub/username?format=json"
                 />
               </div>
             </label>
