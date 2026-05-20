@@ -24,6 +24,24 @@ jobs:
         with:
           go-version-file: panel_backend/go.mod
 
+      - name: Build proxy linux amd64
+        run: |
+          mkdir -p dist/proxy-linux-amd64
+          cd proxy
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ../dist/proxy-linux-amd64/proxy ./cmd/server
+          cp .env.example ../dist/proxy-linux-amd64/.env.example
+          cd ..
+          tar -C dist -czf dist/proxy-linux-amd64.tar.gz proxy-linux-amd64
+
+      - name: Build proxy linux arm64
+        run: |
+          mkdir -p dist/proxy-linux-arm64
+          cd proxy
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o ../dist/proxy-linux-arm64/proxy ./cmd/server
+          cp .env.example ../dist/proxy-linux-arm64/.env.example
+          cd ..
+          tar -C dist -czf dist/proxy-linux-arm64.tar.gz proxy-linux-arm64
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -115,4 +133,6 @@ jobs:
             dist/node_backend-linux-arm64.tar.gz
             dist/singbox-v2ray-api-linux-amd64.tar.gz
             dist/singbox-v2ray-api-linux-arm64.tar.gz
+            dist/proxy-linux-amd64.tar.gz
+            dist/proxy-linux-arm64.tar.gz
             dist/panel_frontend.tar.gz

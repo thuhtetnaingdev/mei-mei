@@ -6,6 +6,7 @@ This repository contains a scalable control-plane/data-plane proxy management sy
 
 - `panel_backend`: Go control plane for users, nodes, subscriptions, and sync
 - `node_backend`: Go node agent for applying `sing-box` config and reporting status
+- `proxy`: Go subscription-to-singbox proxy that maps usernames to profiles via the panel migration-map API
 - `panel_frontend`: React + TypeScript admin panel
 
 ## Architecture
@@ -36,6 +37,12 @@ Node backend:
 
 ```bash
 MEIMEI_CONTROL_PLANE_TOKEN="<panel NODE_SHARED_TOKEN>" bash <(curl -fsSL https://raw.githubusercontent.com/thuhtetnaingdev/mei-mei/main/install/node.sh)
+```
+
+Proxy server (maps subscription usernames to sing-box profiles):
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/thuhtetnaingdev/mei-mei/main/install/proxy.sh)
 ```
 
 Local development deploy to a node over SSH using a local tarball instead of GitHub:
