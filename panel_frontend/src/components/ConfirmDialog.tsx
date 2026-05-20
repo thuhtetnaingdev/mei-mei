@@ -7,6 +7,8 @@ interface ConfirmDialogProps {
   description: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  loading?: boolean;
+  loadingLabel?: string;
   tone?: "neutral" | "danger";
   hideActions?: boolean;
   panelClassName?: string;
@@ -21,6 +23,8 @@ export function ConfirmDialog({
   description,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
+  loading = false,
+  loadingLabel,
   tone = "neutral",
   hideActions = false,
   panelClassName = "",
@@ -42,7 +46,7 @@ export function ConfirmDialog({
   return createPortal(
     <div
       className="fixed inset-0 z-[100] flex items-start justify-center bg-slate-950/75 px-3 pb-4 pt-4 backdrop-blur-md sm:px-4 sm:pb-6 sm:pt-10 md:items-center md:py-6"
-      onClick={onCancel}
+      onClick={loading ? undefined : onCancel}
     >
       <div
         className={`relative max-h-[calc(100vh-2rem)] w-full overflow-hidden rounded-[28px] border border-white/10 bg-[#0d172b] p-4 shadow-panel sm:max-h-[calc(100vh-3rem)] sm:p-6 ${panelWidthClass}`.trim()}
@@ -51,6 +55,7 @@ export function ConfirmDialog({
         <button
           type="button"
           onClick={onCancel}
+          disabled={loading}
           className="absolute right-4 top-4 rounded-full p-2 text-slate-500 transition hover:bg-white/5 hover:text-slate-200"
           aria-label="Close"
         >
@@ -66,16 +71,25 @@ export function ConfirmDialog({
             <button
               type="button"
               onClick={onCancel}
-              className="btn-secondary"
+              disabled={loading}
+              className="btn-secondary disabled:cursor-not-allowed disabled:opacity-60"
             >
               {cancelLabel}
             </button>
             <button
               type="button"
               onClick={onConfirm}
-              className={`transition ${confirmClasses}`}
+              disabled={loading}
+              className={`transition disabled:cursor-not-allowed disabled:opacity-70 ${confirmClasses}`}
             >
-              {confirmLabel}
+              {loading ? (
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  {loadingLabel ?? confirmLabel}
+                </span>
+              ) : (
+                confirmLabel
+              )}
             </button>
           </div>
         )}

@@ -7,6 +7,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 const nav = [
   { to: "/", label: "Overview", shortLabel: "Home" },
   { to: "/mint-pool", label: "Mint Pool", shortLabel: "Mint" },
+  { to: "/migrate", label: "Migrate", shortLabel: "Move" },
   { to: "/miners", label: "Miners", shortLabel: "Mine" },
   { to: "/users", label: "Users", shortLabel: "Users" },
   { to: "/nodes", label: "Nodes", shortLabel: "Nodes" },

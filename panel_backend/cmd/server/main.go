@@ -41,7 +41,7 @@ func main() {
 	collector := services.NewBandwidthCollectorService(services.BandwidthCollectorConfig{
 		DB:              database,
 		NodeSharedToken: cfg.NodeSharedToken,
-		CollectInterval: 10 * time.Second,
+		CollectInterval: 30 * time.Second,
 		RequestTimeout:  30 * time.Second,
 		UserService:     userService,
 		NodeService:     nodeService,

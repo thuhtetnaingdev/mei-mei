@@ -104,6 +104,10 @@ const defaultAllocationEditForm: AllocationEditFormState = {
   expiresAt: ""
 };
 
+function LoadingSpinner({ className = "h-4 w-4" }: { className?: string }) {
+  return <span className={`${className} animate-spin rounded-full border-2 border-current border-t-transparent`} />;
+}
+
 const formatDate = (value?: string | null) => {
   if (!value) {
     return "No expiry";
@@ -389,6 +393,11 @@ export function UsersPage() {
   const [copiedPublicUrl, setCopiedPublicUrl] = useState(false);
   const [formStatus, setFormStatus] = useState("");
   const [formError, setFormError] = useState("");
+  const [userSaving, setUserSaving] = useState(false);
+  const [allocationSaving, setAllocationSaving] = useState(false);
+  const [reductionSaving, setReductionSaving] = useState(false);
+  const [allocationEditSaving, setAllocationEditSaving] = useState(false);
+  const [deleteSaving, setDeleteSaving] = useState(false);
   const [mainWalletBalance, setMainWalletBalance] = useState<number | null>(null);
   const [classificationStatus, setClassificationStatus] = useState<UserClassificationStatus | undefined>(undefined);
   const [classificationStats, setClassificationStats] = useState<UserClassificationStats | undefined>(undefined);
@@ -501,9 +510,13 @@ export function UsersPage() {
 
   const submitUser = async (event: FormEvent) => {
     event.preventDefault();
+    if (userSaving) {
+      return;
+    }
     setFormError("");
 
     try {
+      setUserSaving(true);
       if (editingUserId) {
         await api.patch(`/users/${editingUserId}`, {
           email: form.email,
@@ -539,6 +552,8 @@ export function UsersPage() {
       closeUserDialog();
     } catch (error) {
       setFormError(extractApiError(error, "We could not save this user right now."));
+    } finally {
+      setUserSaving(false);
     }
   };
 
@@ -630,7 +645,7 @@ export function UsersPage() {
 
   const submitAllocation = async (event: FormEvent) => {
     event.preventDefault();
-    if (!editingUserId) {
+    if (!editingUserId || allocationSaving) {
       return;
     }
 
@@ -642,6 +657,7 @@ export function UsersPage() {
     }
 
     try {
+      setAllocationSaving(true);
       await api.post(`/users/${editingUserId}/bandwidth-allocations`, {
         bandwidthGb: allocationForm.bandwidthGb,
         tokenAmount: allocationForm.tokenAmount,
@@ -655,18 +671,21 @@ export function UsersPage() {
       setAllocationForm(defaultAllocationForm);
     } catch (error) {
       setFormError(extractApiError(error, "We could not add bandwidth right now."));
+    } finally {
+      setAllocationSaving(false);
     }
   };
 
   const submitReduction = async (event: FormEvent) => {
     event.preventDefault();
-    if (!reductionTarget || !reductionAllocationTarget) {
+    if (!reductionTarget || !reductionAllocationTarget || reductionSaving) {
       return;
     }
 
     setFormError("");
 
     try {
+      setReductionSaving(true);
       const response = await api.post<User>(`/users/${reductionTarget.id}/bandwidth-allocations/${reductionAllocationTarget.id}/adjust`, {
         action: reductionForm.action,
         bandwidthGb: reductionForm.bandwidthGb,
@@ -683,12 +702,14 @@ export function UsersPage() {
       closeReductionDialog();
     } catch (error) {
       setFormError(extractApiError(error, "We could not adjust this bandwidth entry right now."));
+    } finally {
+      setReductionSaving(false);
     }
   };
 
   const submitAllocationEdit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!allocationEditTargetUser || !allocationEditTarget) {
+    if (!allocationEditTargetUser || !allocationEditTarget || allocationEditSaving) {
       return;
     }
 
@@ -699,6 +720,7 @@ export function UsersPage() {
     }
 
     try {
+      setAllocationEditSaving(true);
       const response = await api.patch<User>(
         `/users/${allocationEditTargetUser.id}/bandwidth-allocations/${allocationEditTarget.id}`,
         {
@@ -713,22 +735,31 @@ export function UsersPage() {
       closeAllocationEditDialog();
     } catch (error) {
       setFormError(extractApiError(error, "We could not update this entry right now."));
+    } finally {
+      setAllocationEditSaving(false);
     }
   };
 
   const deleteUser = async () => {
-    if (!deleteTarget) {
+    if (!deleteTarget || deleteSaving) {
       return;
     }
 
-    await api.delete(`/users/${deleteTarget.id}`);
-    await syncNodes();
-    if (selectedAccess?.userId === deleteTarget.id) {
-      closeAccessDialog();
+    try {
+      setDeleteSaving(true);
+      await api.delete(`/users/${deleteTarget.id}`);
+      await syncNodes();
+      if (selectedAccess?.userId === deleteTarget.id) {
+        closeAccessDialog();
+      }
+      setFormStatus("User deleted.");
+      setDeleteTarget(null);
+      await loadUsers();
+    } catch (error) {
+      setFormError(extractApiError(error, "We could not delete this user right now."));
+    } finally {
+      setDeleteSaving(false);
     }
-    setFormStatus("User deleted.");
-    setDeleteTarget(null);
-    await loadUsers();
   };
 
   // Pagination and filter handlers
@@ -890,6 +921,23 @@ export function UsersPage() {
     }
     return new Date(allocation.expiresAt).getTime() > new Date(latest).getTime() ? allocation.expiresAt : latest;
   }, null);
+  const userSubmitLabel = userSaving
+    ? editingUserId
+      ? "Saving..."
+      : "Creating..."
+    : editingUserId
+      ? "Save Changes"
+      : "Create User";
+  const allocationSubmitLabel = allocationSaving ? "Adding..." : "Add Bandwidth";
+  const allocationEditSubmitLabel = allocationEditSaving ? "Saving..." : "Save Expiry";
+  const reductionSubmitLabel = reductionSaving
+    ? reductionForm.action === "increase"
+      ? "Increasing..."
+      : "Reducing..."
+    : reductionForm.action === "increase"
+      ? "Increase Entry"
+      : "Reduce Entry";
+  const userDialogBusy = userSaving || allocationSaving;
 
   return (
     <div className="space-y-4">
@@ -1270,6 +1318,7 @@ export function UsersPage() {
         }
         hideActions
         panelClassName={editingUserId ? "max-w-4xl" : "max-w-2xl"}
+        loading={userDialogBusy}
         onCancel={closeUserDialog}
         onConfirm={() => undefined}
       >
@@ -1336,11 +1385,12 @@ export function UsersPage() {
                 ) : null}
 
                 <div className="flex flex-wrap justify-end gap-3">
-                  <button type="button" onClick={closeUserDialog} className="btn-secondary">
+                  <button type="button" onClick={closeUserDialog} disabled={userSaving} className="btn-secondary disabled:cursor-not-allowed disabled:opacity-60">
                     Close
                   </button>
-                  <button type="submit" className="btn-primary">
-                    Save Changes
+                  <button type="submit" disabled={userSaving} className="btn-primary disabled:cursor-not-allowed disabled:opacity-70">
+                    {userSaving ? <LoadingSpinner /> : null}
+                    {userSubmitLabel}
                   </button>
                 </div>
               </form>
@@ -1404,8 +1454,9 @@ export function UsersPage() {
                   </div>
 
                   <div className="flex flex-wrap justify-end gap-3">
-                    <button type="submit" className="btn-primary">
-                      Add Bandwidth
+                    <button type="submit" disabled={allocationSaving} className="btn-primary disabled:cursor-not-allowed disabled:opacity-70">
+                      {allocationSaving ? <LoadingSpinner /> : null}
+                      {allocationSubmitLabel}
                     </button>
                   </div>
                 </form>
@@ -1654,11 +1705,12 @@ export function UsersPage() {
               </label>
 
               <div className="flex flex-wrap justify-end gap-3">
-                <button type="button" onClick={closeUserDialog} className="btn-secondary">
+                <button type="button" onClick={closeUserDialog} disabled={userSaving} className="btn-secondary disabled:cursor-not-allowed disabled:opacity-60">
                   Cancel
                 </button>
-                <button type="submit" className="btn-primary">
-                  Create User
+                <button type="submit" disabled={userSaving} className="btn-primary disabled:cursor-not-allowed disabled:opacity-70">
+                  {userSaving ? <LoadingSpinner /> : null}
+                  {userSubmitLabel}
                 </button>
               </div>
             </form>
@@ -1671,8 +1723,14 @@ export function UsersPage() {
         title="Delete user?"
         description={deleteTarget ? `This will remove ${deleteTarget.email} from the panel and sync the change to nodes.` : ""}
         confirmLabel="Delete User"
+        loading={deleteSaving}
+        loadingLabel="Deleting..."
         tone="danger"
-        onCancel={() => setDeleteTarget(null)}
+        onCancel={() => {
+          if (!deleteSaving) {
+            setDeleteTarget(null);
+          }
+        }}
         onConfirm={() => void deleteUser()}
       />
 
@@ -1685,6 +1743,7 @@ export function UsersPage() {
             : ""
         }
         hideActions
+        loading={allocationEditSaving}
         onCancel={closeAllocationEditDialog}
         onConfirm={() => undefined}
       >
@@ -1711,11 +1770,12 @@ export function UsersPage() {
           </label>
 
           <div className="flex flex-wrap justify-end gap-3">
-            <button type="button" onClick={closeAllocationEditDialog} className="btn-secondary">
+            <button type="button" onClick={closeAllocationEditDialog} disabled={allocationEditSaving} className="btn-secondary disabled:cursor-not-allowed disabled:opacity-60">
               Cancel
             </button>
-            <button type="submit" className="btn-primary">
-              Save Expiry
+            <button type="submit" disabled={allocationEditSaving} className="btn-primary disabled:cursor-not-allowed disabled:opacity-70">
+              {allocationEditSaving ? <LoadingSpinner /> : null}
+              {allocationEditSubmitLabel}
             </button>
           </div>
         </form>
@@ -1730,6 +1790,7 @@ export function UsersPage() {
             : ""
         }
         hideActions
+        loading={reductionSaving}
         onCancel={closeReductionDialog}
         onConfirm={() => undefined}
       >
@@ -1777,11 +1838,12 @@ export function UsersPage() {
           </div>
 
           <div className="flex flex-wrap justify-end gap-3">
-            <button type="button" onClick={closeReductionDialog} className="btn-secondary">
+            <button type="button" onClick={closeReductionDialog} disabled={reductionSaving} className="btn-secondary disabled:cursor-not-allowed disabled:opacity-60">
               Cancel
             </button>
-            <button type="submit" className="btn-primary">
-              {reductionForm.action === "increase" ? "Increase Entry" : "Reduce Entry"}
+            <button type="submit" disabled={reductionSaving} className="btn-primary disabled:cursor-not-allowed disabled:opacity-70">
+              {reductionSaving ? <LoadingSpinner /> : null}
+              {reductionSubmitLabel}
             </button>
           </div>
         </form>

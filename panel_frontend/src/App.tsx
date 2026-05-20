@@ -4,6 +4,7 @@ import { AppLayout } from "./layouts/AppLayout";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MintPoolPage } from "./pages/MintPoolPage";
+import { MigratePage } from "./pages/MigratePage";
 import { MinersPage } from "./pages/MinersPage";
 import { NodesPage } from "./pages/NodesPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -22,6 +23,7 @@ export default function App() {
         <Route element={<AppLayout />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/mint-pool" element={<MintPoolPage />} />
+          <Route path="/migrate" element={<MigratePage />} />
           <Route path="/miners" element={<MinersPage />} />
           <Route path="/users" element={<UsersPage />} />
           <Route path="/nodes" element={<NodesPage />} />

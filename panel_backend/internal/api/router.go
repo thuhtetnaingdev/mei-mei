@@ -29,6 +29,7 @@ type Handler struct {
 	minerService                    *services.MinerService
 	nodeService                     *services.NodeService
 	mintPoolService                 *services.MintPoolService
+	migrationService                *services.MigrationService
 	bandwidthReportService          *services.BandwidthReportService
 	bandwidthCollector              *services.BandwidthCollectorService
 	userClassificationService       *services.UserClassificationService
@@ -43,7 +44,7 @@ func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 	bandwidthCollector := services.NewBandwidthCollectorService(services.BandwidthCollectorConfig{
 		DB:              db,
 		NodeSharedToken: cfg.NodeSharedToken,
-		CollectInterval: 10 * time.Second,
+		CollectInterval: 30 * time.Second,
 		RequestTimeout:  30 * time.Second,
 		UserService:     userService,
 		NodeService:     nodeService,
@@ -71,6 +72,7 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 		userService:                     userService,
 		minerService:                    services.NewMinerService(db),
 		mintPoolService:                 services.NewMintPoolService(db),
+		migrationService:                services.NewMigrationService(db),
 		bandwidthReportService:          services.NewBandwidthReportServiceWithSync(db, userService, nodeService),
 		nodeService:                     nodeService,
 		bandwidthCollector:              bandwidthCollector,
@@ -93,7 +95,10 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 	publicAPI.Use(RateLimiterMiddleware())
 	{
 		publicAPI.GET("/users/:uuid", handler.getPublicUser)
+		publicAPI.GET("/migration-map", handler.getMigrationMap)
+		publicAPI.GET("/map", handler.getMigrationMap)
 	}
+	router.GET("/api/map", handler.getMigrationMap)
 
 	// Node API endpoints - authenticated via node tokens
 	nodeAPI := router.Group("/api/nodes")
@@ -141,6 +146,7 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 		protected.POST("/users/classify", handler.triggerUserClassification)
 		protected.GET("/users/classification/stats", handler.getUserClassificationStats)
 		protected.GET("/users/classification/status", handler.getUserClassificationStatus)
+		protected.POST("/migrate/subscription", handler.importSubscription)
 		protected.GET("/admin/profile", handler.getAdminProfile)
 		protected.PUT("/admin/credentials", handler.updateAdminCredentials)
 		protected.GET("/settings/distribution", handler.getDistributionSettings)
@@ -389,6 +395,33 @@ func (h *Handler) createUser(c *gin.Context) {
 
 	h.syncActiveUsersBestEffort()
 	c.JSON(http.StatusCreated, user)
+}
+
+func (h *Handler) importSubscription(c *gin.Context) {
+	var input services.MigrationImportInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	result, err := h.migrationService.ImportSubscription(c.Request.Context(), input)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.syncActiveUsersBestEffort()
+	c.JSON(http.StatusCreated, result)
+}
+
+func (h *Handler) getMigrationMap(c *gin.Context) {
+	mapping, err := h.migrationService.UserIDMap()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, mapping)
 }
 
 func (h *Handler) createMiner(c *gin.Context) {
