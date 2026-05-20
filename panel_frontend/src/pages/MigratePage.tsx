@@ -61,7 +61,12 @@ export function MigratePage() {
     setMapLoading(true);
     setMapError("");
     try {
-      const response = await api.get<Record<string, number>>("/public/migration-map");
+      const mapToken = import.meta.env.VITE_MAP_TOKEN as string | undefined;
+      const headers: Record<string, string> = {};
+      if (mapToken) {
+        headers.Authorization = `Bearer ${mapToken}`;
+      }
+      const response = await api.get<Record<string, number>>("/public/migration-map", { headers });
       setUserMap(response.data);
     } catch (err) {
       setMapError(extractApiError(err, "Could not load migration map."));

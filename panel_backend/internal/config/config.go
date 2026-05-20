@@ -21,6 +21,7 @@ type Config struct {
 	AllowedOrigins      []string
 	FrontendDistDir     string
 	NodeSharedToken     string
+	MapToken            string
 	SyncTimeoutSeconds  int
 }
 
@@ -38,6 +39,7 @@ func Load() Config {
 		AllowedOrigins:      getEnvAsSlice("ALLOWED_ORIGINS", []string{"http://localhost:5173", "http://127.0.0.1:5173"}),
 		FrontendDistDir:     getEnv("FRONTEND_DIST_DIR", ""),
 		NodeSharedToken:     mustEnv("NODE_SHARED_TOKEN"),
+		MapToken:            getEnv("MAP_TOKEN", ""),
 		SyncTimeoutSeconds:  getEnvAsInt("SYNC_TIMEOUT_SECONDS", 10),
 	}
 	cfg.BasePublicURL = getEnv("BASE_PUBLIC_URL", strings.TrimSuffix(cfg.BaseSubscriptionURL, "/subscription"))

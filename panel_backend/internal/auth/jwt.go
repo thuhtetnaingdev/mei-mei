@@ -28,6 +28,13 @@ func (j *JWTManager) GenerateToken(username string) (string, error) {
 	return token.SignedString(j.secret)
 }
 
+func (j *JWTManager) ValidateToken(tokenString string) bool {
+	_, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		return j.secret, nil
+	})
+	return err == nil
+}
+
 func (j *JWTManager) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")

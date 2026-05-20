@@ -415,6 +415,21 @@ func (h *Handler) importSubscription(c *gin.Context) {
 }
 
 func (h *Handler) getMigrationMap(c *gin.Context) {
+	if h.cfg.MapToken != "" {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
+		}
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		validMapToken := tokenString == h.cfg.MapToken
+		validJWT := h.jwt.ValidateToken(tokenString)
+		if !validMapToken && !validJWT {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
+		}
+	}
+
 	mapping, err := h.migrationService.UserIDMap()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -984,6 +999,13 @@ func (h *Handler) getSingboxProfile(c *gin.Context) {
 		c.Data(http.StatusOK, "text/plain; charset=utf-8", profile)
 		return
 	}
+
+	header := "upload=0; download=" + strconv.FormatInt(user.BandwidthUsedBytes, 10)
+	header += "; total=" + strconv.FormatInt(user.BandwidthLimitGB*1024*1024*1024, 10)
+	if user.ExpiresAt != nil {
+		header += "; expire=" + strconv.FormatInt(user.ExpiresAt.Unix(), 10)
+	}
+	c.Header("Subscription-Userinfo", header)
 
 	profile, err := subscription.GenerateSingboxProfile(*user, nodes, protocolSettings)
 	if err != nil {
