@@ -27,12 +27,30 @@ type BandwidthReport struct {
 
 // BandwidthReportService handles processing of bandwidth reports from nodes
 type BandwidthReportService struct {
-	db *gorm.DB
+	db          *gorm.DB
+	userService *UserService
+	nodeService *NodeService
 }
 
 // NewBandwidthReportService creates a new bandwidth report service
 func NewBandwidthReportService(db *gorm.DB) *BandwidthReportService {
-	return &BandwidthReportService{db: db}
+	return &BandwidthReportService{
+		db:          db,
+		userService: NewUserService(db),
+	}
+}
+
+// NewBandwidthReportServiceWithSync creates a bandwidth report service that can
+// resync nodes after limit enforcement disables users.
+func NewBandwidthReportServiceWithSync(db *gorm.DB, userService *UserService, nodeService *NodeService) *BandwidthReportService {
+	if userService == nil {
+		userService = NewUserService(db)
+	}
+	return &BandwidthReportService{
+		db:          db,
+		userService: userService,
+		nodeService: nodeService,
+	}
 }
 
 // ProcessReport processes a bandwidth report from a node and updates user usage
@@ -49,11 +67,17 @@ func (s *BandwidthReportService) ProcessReport(report BandwidthReport, nodeName 
 	log.Printf("[bandwidth-report] processing report from node %s: %d bytes for %d users",
 		report.NodeName, report.TotalBytes, len(report.UserUsage))
 
+	disabledAnyUser := false
+
 	// Process each user's usage
 	for _, usage := range report.UserUsage {
-		if err := s.updateUserUsage(report.NodeName, usage); err != nil {
+		disabled, err := s.updateUserUsage(report.NodeName, usage)
+		if err != nil {
 			log.Printf("[bandwidth-report] failed to update usage for user %s: %v", usage.UUID, err)
 			// Continue processing other users even if one fails
+		}
+		if disabled {
+			disabledAnyUser = true
 		}
 	}
 
@@ -72,6 +96,12 @@ func (s *BandwidthReportService) ProcessReport(report BandwidthReport, nodeName 
 			"last_heartbeat": &now,
 		}).Error; err != nil {
 		log.Printf("[bandwidth-report] failed to update node status: %v", err)
+	}
+
+	if disabledAnyUser {
+		if err := s.syncNodesAfterLimitEnforcement(); err != nil {
+			log.Printf("[bandwidth-report] failed to sync nodes after limit enforcement: %v", err)
+		}
 	}
 
 	return nil
@@ -100,19 +130,37 @@ func (s *BandwidthReportService) validateReport(report BandwidthReport) error {
 }
 
 // updateUserUsage updates the bandwidth usage for a specific user
-func (s *BandwidthReportService) updateUserUsage(nodeName string, usage UserUsageReport) error {
+func (s *BandwidthReportService) updateUserUsage(nodeName string, usage UserUsageReport) (bool, error) {
 	if usage.UUID == "" || usage.BytesUsed <= 0 {
-		return nil // Skip invalid or zero usage
+		return false, nil // Skip invalid or zero usage
 	}
 
-	userService := NewUserService(s.db)
-	_, _, err := userService.RecordUsageOnNode(usage.UUID, nodeName, usage.BytesUsed)
+	userService := s.userService
+	if userService == nil {
+		userService = NewUserService(s.db)
+	}
+
+	disabled, _, err := userService.RecordUsageOnNode(usage.UUID, nodeName, usage.BytesUsed)
 	if err != nil {
-		return fmt.Errorf("database update failed: %w", err)
+		return false, fmt.Errorf("database update failed: %w", err)
 	}
 
 	log.Printf("[bandwidth-report] updated user %s: +%d bytes", usage.UUID, usage.BytesUsed)
-	return nil
+	return disabled, nil
+}
+
+func (s *BandwidthReportService) syncNodesAfterLimitEnforcement() error {
+	if s.userService == nil || s.nodeService == nil {
+		return nil
+	}
+
+	activeUsers, err := s.userService.ActiveUsers()
+	if err != nil {
+		return err
+	}
+
+	_, err = s.nodeService.SyncAllUsers(activeUsers)
+	return err
 }
 
 // updateNodeUsage updates the total bandwidth usage for a node

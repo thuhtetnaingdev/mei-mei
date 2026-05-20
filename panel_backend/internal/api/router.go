@@ -43,7 +43,7 @@ func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 	bandwidthCollector := services.NewBandwidthCollectorService(services.BandwidthCollectorConfig{
 		DB:              db,
 		NodeSharedToken: cfg.NodeSharedToken,
-		CollectInterval: 60 * time.Second,
+		CollectInterval: 10 * time.Second,
 		RequestTimeout:  30 * time.Second,
 		UserService:     userService,
 		NodeService:     nodeService,
@@ -71,7 +71,7 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 		userService:                     userService,
 		minerService:                    services.NewMinerService(db),
 		mintPoolService:                 services.NewMintPoolService(db),
-		bandwidthReportService:          services.NewBandwidthReportService(db),
+		bandwidthReportService:          services.NewBandwidthReportServiceWithSync(db, userService, nodeService),
 		nodeService:                     nodeService,
 		bandwidthCollector:              bandwidthCollector,
 		userClassificationService:       userClassificationService,
