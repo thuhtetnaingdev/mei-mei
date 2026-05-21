@@ -823,6 +823,9 @@ func ConvertWorking(proxies []ParsedProxy, results []TestResult) []SingboxOutbou
 		if !ok || !r.Working {
 			continue
 		}
+		if isXraySupported(p) && r.SpeedMbps <= 0 {
+			continue
+		}
 		outbound := proxyToSingbox(p)
 		if outbound == nil {
 			continue
