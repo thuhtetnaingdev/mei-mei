@@ -882,13 +882,20 @@ func convertTransport(p ParsedProxy) map[string]interface{} {
 	return nil
 }
 
+func sanitizeFlow(flow string) string {
+	if flow == "xtls-rprx-vision" {
+		return flow
+	}
+	return ""
+}
+
 func vlessToSingbox(p ParsedProxy) map[string]interface{} {
 	outbound := map[string]interface{}{
 		"type":        "vless",
 		"server":      p.Host,
 		"server_port": p.Port,
 		"uuid":        p.UUID,
-		"flow":        p.Flow,
+		"flow":        sanitizeFlow(p.Flow),
 		"network":     "tcp",
 	}
 
