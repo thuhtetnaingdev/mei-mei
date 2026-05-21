@@ -243,8 +243,7 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 func buildSingboxRouteRules(settings services.ProtocolSettings) []map[string]interface{} {
 	rules := []map[string]interface{}{
 		{
-			"action":        "sniff",
-			"sniff_timeout": "300ms",
+			"action": "sniff",
 		},
 		{
 			"port":   53,
