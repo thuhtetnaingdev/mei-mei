@@ -292,6 +292,11 @@ export function IntegrationsPage() {
                                 <span className="shrink-0 text-xs text-slate-500">
                                   {(ob as Record<string, unknown>).latencyMs != null ? `${(ob as Record<string, unknown>).latencyMs}ms` : ""}
                                 </span>
+                                {(ob as Record<string, unknown>).speedMbps != null && (ob as Record<string, unknown>).speedMbps as number > 0 && (
+                                  <span className="shrink-0 text-xs text-sky-400">
+                                    {(ob as Record<string, unknown>).speedMbps as number} Mbps
+                                  </span>
+                                )}
                                 <button
                                   onClick={() => navigator.clipboard.writeText((ob as Record<string, unknown>).rawUri as string || "")}
                                   className="ml-auto shrink-0 rounded bg-white/5 px-2 py-1 text-xs text-slate-400 hover:text-white"

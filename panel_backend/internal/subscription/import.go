@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -39,13 +40,14 @@ type ParsedProxy struct {
 }
 
 type TestResult struct {
-	URI       string `json:"uri"`
-	Protocol  string `json:"protocol"`
-	Host      string `json:"host"`
-	Port      int    `json:"port"`
-	Working   bool   `json:"working"`
-	LatencyMs int64  `json:"latencyMs"`
-	Error     string `json:"error,omitempty"`
+	URI        string  `json:"uri"`
+	Protocol   string  `json:"protocol"`
+	Host       string  `json:"host"`
+	Port       int     `json:"port"`
+	Working    bool    `json:"working"`
+	LatencyMs  int64   `json:"latencyMs"`
+	SpeedMbps  float64 `json:"speedMbps,omitempty"`
+	Error      string  `json:"error,omitempty"`
 }
 
 type ImportResult struct {
@@ -60,6 +62,7 @@ type SingboxOutbound struct {
 	Tag       string                 `json:"tag"`
 	Config    map[string]interface{} `json:"config"`
 	LatencyMs int64                  `json:"latencyMs"`
+	SpeedMbps float64                `json:"speedMbps,omitempty"`
 	Remark    string                 `json:"remark"`
 	RawURI    string                 `json:"rawUri"`
 }
@@ -369,6 +372,10 @@ const (
 	testPath       = "/generate_204"
 	testPort       = 80
 	testTimeout    = 15 * time.Second
+	speedTestHost  = "speedtest.tele2.net"
+	speedTestPath  = "/1MB.zip"
+	speedTestPort  = 80
+	speedTestTimeout = 30 * time.Second
 	xrayStartWait  = 800 * time.Millisecond
 	xrayStartLimit  = 50
 	xraySocksLimit  = 100
@@ -548,6 +555,84 @@ func buildXrayStreamSettings(p ParsedProxy) map[string]interface{} {
 	return settings
 }
 
+func socks5SpeedTest(proxyHost string, proxyPort int, timeout time.Duration) float64 {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", proxyHost, proxyPort), timeout)
+	if err != nil {
+		return 0
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(timeout))
+
+	conn.Write([]byte{0x05, 0x01, 0x00})
+	resp := make([]byte, 2)
+	if _, err := io.ReadFull(conn, resp); err != nil || resp[0] != 0x05 || resp[1] != 0x00 {
+		return 0
+	}
+
+	domainLen := len(speedTestHost)
+	req := make([]byte, 0, 4+1+domainLen+2)
+	req = append(req, 0x05, 0x01, 0x00, 0x03, byte(domainLen))
+	req = append(req, []byte(speedTestHost)...)
+	req = append(req, byte(speedTestPort>>8), byte(speedTestPort))
+	conn.Write(req)
+	resp = make([]byte, 4)
+	if _, err := io.ReadFull(conn, resp); err != nil || resp[1] != 0x00 {
+		return 0
+	}
+	switch resp[3] {
+	case 0x01:
+		io.ReadFull(conn, make([]byte, 6))
+	case 0x03:
+		dl := make([]byte, 1)
+		io.ReadFull(conn, dl)
+		io.ReadFull(conn, make([]byte, int(dl[0])+2))
+	case 0x04:
+		io.ReadFull(conn, make([]byte, 18))
+	}
+
+	httpReq := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Mozilla/5.0 (compatible; Speed-Test/1.0)\r\nConnection: close\r\n\r\n", speedTestPath, speedTestHost)
+	conn.Write([]byte(httpReq))
+
+	reader := bufio.NewReader(conn)
+	_, err = reader.ReadString('\n')
+	if err != nil {
+		return 0
+	}
+
+	var contentLength int64
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return 0
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			break
+		}
+		if strings.HasPrefix(strings.ToLower(line), "content-length:") {
+			contentLength, _ = strconv.ParseInt(strings.TrimSpace(line[15:]), 10, 64)
+		}
+	}
+	if contentLength == 0 {
+		return 0
+	}
+
+	start := time.Now()
+	written, _ := io.Copy(io.Discard, reader)
+	elapsed := time.Since(start)
+	if written == 0 {
+		return 0
+	}
+
+	megabits := float64(written) * 8.0 / 1_000_000.0
+	seconds := elapsed.Seconds()
+	if seconds <= 0 {
+		return 0
+	}
+	speed := megabits / seconds
+	return math.Round(speed*100) / 100
+}
+
 func socks5Connect(proxyHost string, proxyPort int, targetHost string, targetPort int, timeout time.Duration) (bool, error) {
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", proxyHost, proxyPort), timeout)
 	if err != nil {
@@ -698,6 +783,28 @@ func testXrayBatch(proxies []ParsedProxy, indices []int, results []TestResult) {
 	}
 	testWg.Wait()
 
+	// Phase 2: Speed test for working proxies
+	speedTestSem := make(chan struct{}, 20)
+	var speedWg sync.WaitGroup
+	for i, inst := range instances {
+		if inst == nil {
+			continue
+		}
+		speedTestSem <- struct{}{}
+		speedWg.Add(1)
+		go func(idx int, inst *xrayInstance) {
+			defer func() { <-speedTestSem; speedWg.Done() }()
+			if !results[idx].Working {
+				return
+			}
+			speed := socks5SpeedTest("127.0.0.1", inst.socksPort, speedTestTimeout)
+			if speed > 0 {
+				results[idx].SpeedMbps = speed
+			}
+		}(indices[i], inst)
+	}
+	speedWg.Wait()
+
 	for _, inst := range instances {
 		if inst != nil && inst.cmd != nil && inst.cmd.Process != nil {
 			inst.cmd.Process.Kill()
@@ -819,6 +926,7 @@ func ConvertWorking(proxies []ParsedProxy, results []TestResult) []SingboxOutbou
 			Tag:       tag,
 			Config:    outbound,
 			LatencyMs: r.LatencyMs,
+			SpeedMbps: r.SpeedMbps,
 			Remark:    p.Remark,
 			RawURI:    p.RawURI,
 		})
