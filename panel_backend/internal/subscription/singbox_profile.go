@@ -213,7 +213,6 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 			"route": map[string]interface{}{
 			"auto_detect_interface":   true,
 			"default_domain_resolver": "local-dns",
-			"domain_strategy":         "prefer_ipv4",
 			"final":                   "proxy",
 			"rule_set": []map[string]interface{}{
 				{
