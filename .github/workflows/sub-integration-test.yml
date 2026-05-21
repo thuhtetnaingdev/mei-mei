@@ -7,9 +7,6 @@ on:
     - cron: '0 * * * *'
   workflow_dispatch:
 
-env:
-  SINGBOX_VERSION: "1.13.3"
-
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -21,12 +18,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: panel_backend/go.mod
-
-      - name: Download sing-box
-        run: |
-          curl -sL "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box-${SINGBOX_VERSION}-linux-amd64.tar.gz" \
-            | tar xz -C /tmp
-          sudo cp "/tmp/sing-box-${SINGBOX_VERSION}-linux-amd64/sing-box" /usr/local/bin/sing-box
 
       - name: Run sub integration tests
         env:

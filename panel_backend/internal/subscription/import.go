@@ -1,7 +1,6 @@
 package subscription
 
 import (
-	"bufio"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
@@ -10,13 +9,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -364,270 +358,17 @@ func parseTUIC(u *url.URL, raw, remark string) *ParsedProxy {
 	return p
 }
 
-const (
-	testHost      = "www.gstatic.com"
-	testPath      = "/generate_204"
-	testPort      = 80
-	testTimeout   = 15 * time.Second
-	sbStartWait   = 800 * time.Millisecond
-	sbStartLimit  = 50
-	sbSocksLimit  = 100
-)
-
-var singboxPaths = []string{
-	"/usr/local/bin/sing-box",
-	"/usr/local/sing-box/sing-box",
-	"/opt/homebrew/bin/sing-box",
-	"sing-box",
-}
-
-var socksPortCounter uint32 = 19000
-
-func findSingboxBinary() string {
-	for _, p := range singboxPaths {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	// also try PATH
-	if path, err := exec.LookPath("sing-box"); err == nil {
-		return path
-	}
-	return ""
-}
-
-func nextSocksPort() int {
-	return int(atomic.AddUint32(&socksPortCounter, 1))
-}
-
-func isSingboxSupported(p ParsedProxy) bool {
-	switch p.Protocol {
-	case "vless", "vmess", "trojan", "shadowsocks":
-		return true
-	}
-	return false
-}
-
-func buildSingboxConfig(p ParsedProxy, socksPort int) map[string]interface{} {
-	outbound := proxyToSingbox(p)
-	if outbound == nil {
-		return nil
-	}
-	outbound["tag"] = "proxy"
-
-	inbound := map[string]interface{}{
-		"type":        "socks",
-		"tag":         "socks-in",
-		"listen":      "127.0.0.1",
-		"listen_port": socksPort,
-	}
-
-	directOutbound := map[string]interface{}{
-		"type": "direct",
-		"tag":  "direct",
-	}
-
-	return map[string]interface{}{
-		"log": map[string]interface{}{
-			"level": "error",
-		},
-		"inbounds":  []map[string]interface{}{inbound},
-		"outbounds": []map[string]interface{}{outbound, directOutbound},
-		"route": map[string]interface{}{
-			"final": "proxy",
-		},
-	}
-}
-
-func socks5Connect(proxyHost string, proxyPort int, targetHost string, targetPort int, timeout time.Duration) (bool, error) {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", proxyHost, proxyPort), timeout)
-	if err != nil {
-		return false, fmt.Errorf("socks5 dial: %w", err)
-	}
-	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(timeout))
-
-	if _, err := conn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
-		return false, fmt.Errorf("socks5 handshake write: %w", err)
-	}
-	resp := make([]byte, 2)
-	if _, err := io.ReadFull(conn, resp); err != nil {
-		return false, fmt.Errorf("socks5 handshake read: %w", err)
-	}
-	if resp[0] != 0x05 || resp[1] != 0x00 {
-		return false, fmt.Errorf("socks5 handshake rejected: %v", resp)
-	}
-
-	domainLen := len(targetHost)
-	req := make([]byte, 0, 4+1+domainLen+2)
-	req = append(req, 0x05, 0x01, 0x00, 0x03, byte(domainLen))
-	req = append(req, []byte(targetHost)...)
-	req = append(req, byte(targetPort>>8), byte(targetPort))
-	if _, err := conn.Write(req); err != nil {
-		return false, fmt.Errorf("socks5 connect write: %w", err)
-	}
-
-	resp = make([]byte, 4)
-	if _, err := io.ReadFull(conn, resp); err != nil {
-		return false, fmt.Errorf("socks5 connect read: %w", err)
-	}
-	if resp[1] != 0x00 {
-		return false, fmt.Errorf("socks5 connect rejected: code %d", resp[1])
-	}
-
-	httpReq := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Mozilla/5.0 (compatible; Proxy-Test/1.0)\r\nConnection: close\r\n\r\n", testPath, testHost)
-	if _, err := conn.Write([]byte(httpReq)); err != nil {
-		return false, fmt.Errorf("http write: %w", err)
-	}
-
-	reader := bufio.NewReader(conn)
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		return false, fmt.Errorf("http read: %w", err)
-	}
-
-	if len(response) < 9 {
-		return false, fmt.Errorf("invalid http response: %s", response)
-	}
-	statusCode := strings.TrimSpace(response[9:12])
-	code, _ := strconv.Atoi(statusCode)
-	if code >= 200 && code < 400 {
-		return true, nil
-	}
-	return false, fmt.Errorf("http status %s", statusCode)
-}
-
-type sbInstance struct {
-	cmd        *exec.Cmd
-	socksPort  int
-	configPath string
-}
-
-func testSingboxBatch(proxies []ParsedProxy, indices []int, results []TestResult) {
-	sbBin := findSingboxBinary()
-	if sbBin == "" {
-		for i, p := range proxies {
-			ok, lat := basicTest(p)
-			results[indices[i]] = TestResult{
-				URI:       p.RawURI,
-				Protocol:  p.Protocol,
-				Host:      p.Host,
-				Port:      p.Port,
-				Working:   ok,
-				LatencyMs: lat,
-			}
-		}
-		return
-	}
-
-	instances := make([]*sbInstance, len(proxies))
-	var startWg sync.WaitGroup
-	startSem := make(chan struct{}, sbStartLimit)
-
-	for i, p := range proxies {
-		startSem <- struct{}{}
-		startWg.Add(1)
-		go func(i int, p ParsedProxy) {
-			defer func() { <-startSem; startWg.Done() }()
-			socksPort := nextSocksPort()
-			config := buildSingboxConfig(p, socksPort)
-			configJSON, _ := json.Marshal(config)
-			configPath := filepath.Join(os.TempDir(), fmt.Sprintf("singbox_%d_%d.json", time.Now().UnixNano(), socksPort))
-			os.WriteFile(configPath, configJSON, 0644)
-
-			cmd := exec.Command(sbBin, "run", "-c", configPath)
-			cmd.Start()
-			instances[i] = &sbInstance{cmd: cmd, socksPort: socksPort, configPath: configPath}
-		}(i, p)
-	}
-	startWg.Wait()
-
-	time.Sleep(sbStartWait)
-
-	var testWg sync.WaitGroup
-	testSem := make(chan struct{}, sbSocksLimit)
-	var mu sync.Mutex
-
-	for i, inst := range instances {
-		if inst == nil {
-			continue
-		}
-		testSem <- struct{}{}
-		testWg.Add(1)
-		go func(idx int, inst *sbInstance, p ParsedProxy) {
-			defer func() { <-testSem; testWg.Done() }()
-			start := time.Now()
-			ok, _ := socks5Connect("127.0.0.1", inst.socksPort, testHost, testPort, testTimeout)
-			lat := time.Since(start).Milliseconds()
-			errStr := ""
-			if !ok {
-				errStr = "proxy test failed"
-			}
-			mu.Lock()
-			results[idx] = TestResult{
-				URI:       p.RawURI,
-				Protocol:  p.Protocol,
-				Host:      p.Host,
-				Port:      p.Port,
-				Working:   ok,
-				LatencyMs: lat,
-				Error:     errStr,
-			}
-			mu.Unlock()
-		}(indices[i], inst, proxies[i])
-	}
-	testWg.Wait()
-
-	for _, inst := range instances {
-		if inst != nil && inst.cmd != nil && inst.cmd.Process != nil {
-			inst.cmd.Process.Kill()
-			os.Remove(inst.configPath)
-		}
-	}
-}
-
 func TestAll(proxies []ParsedProxy) []TestResult {
-	return TestAllWithConcurrency(proxies, 1000)
+	return TestAllWithConcurrency(proxies, 100)
 }
 
-func TestAllWithConcurrency(proxies []ParsedProxy, batchSize int) []TestResult {
+func TestAllWithConcurrency(proxies []ParsedProxy, concurrency int) []TestResult {
 	if len(proxies) == 0 {
 		return nil
 	}
 
 	results := make([]TestResult, len(proxies))
-
-	var sbIdxs, basicIdxs []int
-	var sbProxies, basicProxies []ParsedProxy
-
-	for i, p := range proxies {
-		if isSingboxSupported(p) {
-			sbProxies = append(sbProxies, p)
-			sbIdxs = append(sbIdxs, i)
-		} else {
-			basicProxies = append(basicProxies, p)
-			basicIdxs = append(basicIdxs, i)
-		}
-	}
-
-	for i := 0; i < len(sbProxies); i += batchSize {
-		end := i + batchSize
-		if end > len(sbProxies) {
-			end = len(sbProxies)
-		}
-		testSingboxBatch(sbProxies[i:end], sbIdxs[i:end], results)
-	}
-
-	fillResults(results, basicProxies, basicIdxs)
-
-	return results
-}
-
-func fillResults(results []TestResult, proxies []ParsedProxy, indices []int) {
-	if len(proxies) == 0 {
-		return
-	}
-	sem := make(chan struct{}, 100)
+	sem := make(chan struct{}, concurrency)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
@@ -637,19 +378,26 @@ func fillResults(results []TestResult, proxies []ParsedProxy, indices []int) {
 		go func(i int, p ParsedProxy) {
 			defer func() { <-sem; wg.Done() }()
 			ok, lat := basicTest(p)
+			errStr := ""
+			if !ok {
+				errStr = "tcp/tls handshake failed"
+			}
 			mu.Lock()
-			results[indices[i]] = TestResult{
+			results[i] = TestResult{
 				URI:       p.RawURI,
 				Protocol:  p.Protocol,
 				Host:      p.Host,
 				Port:      p.Port,
 				Working:   ok,
 				LatencyMs: lat,
+				Error:     errStr,
 			}
 			mu.Unlock()
 		}(i, p)
 	}
 	wg.Wait()
+
+	return results
 }
 
 func basicTest(p ParsedProxy) (bool, int64) {
