@@ -583,6 +583,17 @@ func socks5Connect(proxyHost string, proxyPort int, targetHost string, targetPor
 	if resp[1] != 0x00 {
 		return false, fmt.Errorf("socks5 connect rejected: code %d", resp[1])
 	}
+	// drain the remaining SOCKS5 response (bind address + port)
+	switch resp[3] {
+	case 0x01: // IPv4 - 4 bytes addr + 2 bytes port
+		io.ReadFull(conn, make([]byte, 6))
+	case 0x03: // domain - 1 byte len + len bytes addr + 2 bytes port
+		domainLenResp := make([]byte, 1)
+		io.ReadFull(conn, domainLenResp)
+		io.ReadFull(conn, make([]byte, int(domainLenResp[0])+2))
+	case 0x04: // IPv6 - 16 bytes addr + 2 bytes port
+		io.ReadFull(conn, make([]byte, 18))
+	}
 
 	httpReq := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Mozilla/5.0 (compatible; Proxy-Test/1.0)\r\nConnection: close\r\n\r\n", testPath, testHost)
 	if _, err := conn.Write([]byte(httpReq)); err != nil {
