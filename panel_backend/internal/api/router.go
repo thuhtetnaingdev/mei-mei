@@ -534,7 +534,7 @@ func (h *Handler) collectIntegrationWorkingProxies(max int) []map[string]interfa
 	}
 	result := make([]map[string]interface{}, 0, max)
 	for _, integ := range integrations {
-		if integ.Status != models.IntegrationStatusCompleted || integ.Result == "" {
+		if integ.Status == models.IntegrationStatusPending || integ.Result == "" {
 			continue
 		}
 		var parsed struct {
