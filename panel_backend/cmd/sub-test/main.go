@@ -20,8 +20,8 @@ type PendingResponse struct {
 }
 
 func main() {
-	apiURL := os.Getenv("API_URL")
-	ciToken := os.Getenv("CI_TOKEN")
+	apiURL := strings.TrimSpace(os.Getenv("API_URL"))
+	ciToken := strings.TrimSpace(os.Getenv("CI_TOKEN"))
 
 	if apiURL == "" || ciToken == "" {
 		fmt.Fprintln(os.Stderr, "API_URL and CI_TOKEN env vars required")
