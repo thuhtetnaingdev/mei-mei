@@ -859,6 +859,29 @@ func proxyToSingbox(p ParsedProxy) map[string]interface{} {
 	}
 }
 
+func convertTransport(p ParsedProxy) map[string]interface{} {
+	switch p.Network {
+	case "ws":
+		t := map[string]interface{}{
+			"type": "ws",
+			"path": p.Path,
+		}
+		if p.SNI != "" {
+			t["headers"] = map[string]interface{}{"Host": p.SNI}
+		}
+		return t
+	case "grpc":
+		t := map[string]interface{}{
+			"type": "grpc",
+		}
+		if p.Path != "" {
+			t["service_name"] = p.Path
+		}
+		return t
+	}
+	return nil
+}
+
 func vlessToSingbox(p ParsedProxy) map[string]interface{} {
 	outbound := map[string]interface{}{
 		"type":        "vless",
@@ -866,7 +889,7 @@ func vlessToSingbox(p ParsedProxy) map[string]interface{} {
 		"server_port": p.Port,
 		"uuid":        p.UUID,
 		"flow":        p.Flow,
-		"network":     p.Network,
+		"network":     "tcp",
 	}
 
 	if p.Security == "tls" || p.Security == "reality" {
@@ -893,12 +916,8 @@ func vlessToSingbox(p ParsedProxy) map[string]interface{} {
 		outbound["tls"] = tlsConfig
 	}
 
-	if p.Network == "ws" {
-		outbound["transport"] = map[string]interface{}{
-			"type":    "ws",
-			"path":    p.Path,
-			"headers": map[string]interface{}{},
-		}
+	if t := convertTransport(p); t != nil {
+		outbound["transport"] = t
 	}
 
 	return outbound
@@ -910,7 +929,7 @@ func vmessToSingbox(p ParsedProxy) map[string]interface{} {
 		"server":      p.Host,
 		"server_port": p.Port,
 		"uuid":        p.UUID,
-		"network":     p.Network,
+		"network":     "tcp",
 	}
 
 	if p.Security == "tls" {
@@ -926,12 +945,8 @@ func vmessToSingbox(p ParsedProxy) map[string]interface{} {
 		outbound["tls"] = tlsConfig
 	}
 
-	if p.Network == "ws" {
-		outbound["transport"] = map[string]interface{}{
-			"type":    "ws",
-			"path":    p.Path,
-			"headers": map[string]interface{}{},
-		}
+	if t := convertTransport(p); t != nil {
+		outbound["transport"] = t
 	}
 
 	return outbound
