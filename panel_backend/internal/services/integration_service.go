@@ -121,9 +121,7 @@ func (s *IntegrationService) GetPendingForTest(limit int) ([]models.Subscription
 
 func (s *IntegrationService) StartTest(id string, testRunID string) error {
 	now := time.Now()
-	result := s.db.Model(&models.SubscriptionIntegration{}).Where(
-		"id = ? AND status != ?", id, models.IntegrationStatusTesting,
-	).Updates(map[string]any{
+	result := s.db.Model(&models.SubscriptionIntegration{}).Where("id = ?", id).Updates(map[string]any{
 		"status":              models.IntegrationStatusTesting,
 		"test_run_id":         testRunID,
 		"last_test_started_at": now,
@@ -132,7 +130,7 @@ func (s *IntegrationService) StartTest(id string, testRunID string) error {
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("integration %s is not available for testing", id)
+		return fmt.Errorf("integration %s not found", id)
 	}
 	return nil
 }

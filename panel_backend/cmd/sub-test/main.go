@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-type PendingResponse struct {
+type IntegrationsResponse struct {
 	Integrations []struct {
 		ID              uint   `json:"id"`
 		SubscriptionURL string `json:"subscriptionUrl"`
@@ -32,32 +32,29 @@ func main() {
 
 	client := &http.Client{Timeout: 10 * time.Minute}
 
-	// 1. Fetch pending integrations
-	pending, err := fetchPending(client, apiURL, ciToken)
+	all, err := fetchAll(client, apiURL, ciToken)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fetch pending: %v\n", err)
+		fmt.Fprintf(os.Stderr, "fetch integrations: %v\n", err)
 		os.Exit(1)
 	}
 
-	if len(pending.Integrations) == 0 {
-		fmt.Println("no pending integrations to test")
+	if len(all.Integrations) == 0 {
+		fmt.Println("no integrations to test")
 		return
 	}
 
-	fmt.Printf("found %d pending integration(s)\n", len(pending.Integrations))
+	fmt.Printf("found %d integration(s)\n", len(all.Integrations))
 
-	for _, integ := range pending.Integrations {
+	for _, integ := range all.Integrations {
 		fmt.Printf("\ntesting integration %d: %s\n", integ.ID, integ.SubscriptionURL)
 		testRunID := fmt.Sprintf("ci-%d-%d", integ.ID, time.Now().UnixMilli())
 
-		// 2. Start test
 		if err := startTest(client, apiURL, ciToken, integ.ID, testRunID); err != nil {
 			fmt.Fprintf(os.Stderr, "  start test failed: %v\n", err)
 			continue
 		}
 		fmt.Printf("  started test run %s\n", testRunID)
 
-		// 3. Run the actual subscription import (fetch + parse + test + convert)
 		result, err := subscription.ImportSubscription(integ.SubscriptionURL)
 		if err != nil {
 			fmt.Printf("  test failed: %v\n", err)
@@ -71,7 +68,6 @@ func main() {
 
 		rj, _ := json.Marshal(result)
 
-		// 4. Complete test with results
 		status := "completed"
 		if result.FailCount == result.TotalURLs {
 			status = "completed"
@@ -85,8 +81,8 @@ func main() {
 	}
 }
 
-func fetchPending(client *http.Client, apiURL, ciToken string) (*PendingResponse, error) {
-	req, err := http.NewRequest("GET", apiURL+"/api/integration/test/pending?limit=10", nil)
+func fetchAll(client *http.Client, apiURL, ciToken string) (*IntegrationsResponse, error) {
+	req, err := http.NewRequest("GET", apiURL+"/api/integration/test/all", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -107,11 +103,11 @@ func fetchPending(client *http.Client, apiURL, ciToken string) (*PendingResponse
 		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var pr PendingResponse
-	if err := json.Unmarshal(body, &pr); err != nil {
+	var ir IntegrationsResponse
+	if err := json.Unmarshal(body, &ir); err != nil {
 		return nil, err
 	}
-	return &pr, nil
+	return &ir, nil
 }
 
 func startTest(client *http.Client, apiURL, ciToken string, id uint, testRunID string) error {

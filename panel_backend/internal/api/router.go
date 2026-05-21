@@ -189,7 +189,7 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 	ciAPI := router.Group("/api/integration")
 	ciAPI.Use(ciAuthMiddleware(cfg))
 	{
-		ciAPI.GET("/test/pending", handler.getPendingIntegrationTests)
+		ciAPI.GET("/test/all", handler.listAllIntegrationTests)
 		ciAPI.POST("/test/start/:id", handler.startIntegrationTest)
 		ciAPI.POST("/test/complete/:id", handler.completeIntegrationTest)
 	}
@@ -510,6 +510,15 @@ func (h *Handler) getPendingIntegrationTests(c *gin.Context) {
 		limit = 10
 	}
 	list, err := h.integrationService.GetPendingForTest(limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"integrations": list})
+}
+
+func (h *Handler) listAllIntegrationTests(c *gin.Context) {
+	list, err := h.integrationService.List()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
