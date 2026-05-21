@@ -365,8 +365,8 @@ func parseTUIC(u *url.URL, raw, remark string) *ParsedProxy {
 }
 
 const (
-	testHost      = "httpbin.org"
-	testPath      = "/status/200"
+	testHost      = "www.gstatic.com"
+	testPath      = "/generate_204"
 	testPort      = 80
 	testTimeout   = 15 * time.Second
 	sbStartWait   = 800 * time.Millisecond
