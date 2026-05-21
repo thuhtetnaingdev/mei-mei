@@ -9,8 +9,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func GenerateSingboxProfile(user models.User, nodes []models.Node, settings services.ProtocolSettings) ([]byte, error) {
-	config := buildSingboxProfileConfig(user, nodes, settings)
+func GenerateSingboxProfile(user models.User, nodes []models.Node, settings services.ProtocolSettings, extraOutbounds []map[string]interface{}) ([]byte, error) {
+	config := buildSingboxProfileConfig(user, nodes, settings, extraOutbounds)
 	return json.MarshalIndent(config, "", "  ")
 }
 
@@ -19,10 +19,22 @@ func GenerateClashProfile(user models.User, nodes []models.Node, settings servic
 	return yaml.Marshal(config)
 }
 
-func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings services.ProtocolSettings) map[string]interface{} {
+func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings services.ProtocolSettings, extraOutbounds []map[string]interface{}) map[string]interface{} {
 	availableNodes := filterAvailableNodes(user, nodes)
-	proxyOutbounds := collectOutboundTags(user, availableNodes, settings)
-	urltestOutbounds := collectOutboundTags(user, availableNodes, settings)
+	nodeTags := collectOutboundTags(user, availableNodes, settings)
+
+	extraTags := make([]string, 0, len(extraOutbounds))
+	for _, ob := range extraOutbounds {
+		if tag, ok := ob["tag"].(string); ok {
+			extraTags = append(extraTags, tag)
+		}
+	}
+
+	proxyOutbounds := make([]string, 0, len(nodeTags)+len(extraTags))
+	proxyOutbounds = append(proxyOutbounds, nodeTags...)
+	proxyOutbounds = append(proxyOutbounds, extraTags...)
+
+	urltestOutbounds := nodeTags
 
 	outbounds := []map[string]interface{}{
 		{
@@ -133,6 +145,10 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 			})
 		}
 
+	}
+
+	for _, ob := range extraOutbounds {
+		outbounds = append(outbounds, ob)
 	}
 
 	return map[string]interface{}{

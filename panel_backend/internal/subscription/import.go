@@ -368,15 +368,11 @@ func parseTUIC(u *url.URL, raw, remark string) *ParsedProxy {
 }
 
 const (
-	testHost       = "www.gstatic.com"
-	testPath       = "/generate_204"
-	testPort       = 80
-	testTimeout    = 15 * time.Second
-	speedTestHost  = "speedtest.tele2.net"
-	speedTestPath  = "/1MB.zip"
-	speedTestPort  = 80
-	speedTestTimeout = 30 * time.Second
-	xrayStartWait  = 800 * time.Millisecond
+	testHost        = "speedtest.tele2.net"
+	testPath        = "/100KB.zip"
+	testPort        = 80
+	testTimeout     = 15 * time.Second
+	xrayStartWait   = 800 * time.Millisecond
 	xrayStartLimit  = 50
 	xraySocksLimit  = 100
 )
@@ -555,10 +551,10 @@ func buildXrayStreamSettings(p ParsedProxy) map[string]interface{} {
 	return settings
 }
 
-func socks5SpeedTest(proxyHost string, proxyPort int, timeout time.Duration) float64 {
+func socks5CombinedTest(proxyHost string, proxyPort int, timeout time.Duration) (bool, int64, float64) {
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", proxyHost, proxyPort), timeout)
 	if err != nil {
-		return 0
+		return false, 0, 0
 	}
 	defer conn.Close()
 	conn.SetDeadline(time.Now().Add(timeout))
@@ -566,18 +562,18 @@ func socks5SpeedTest(proxyHost string, proxyPort int, timeout time.Duration) flo
 	conn.Write([]byte{0x05, 0x01, 0x00})
 	resp := make([]byte, 2)
 	if _, err := io.ReadFull(conn, resp); err != nil || resp[0] != 0x05 || resp[1] != 0x00 {
-		return 0
+		return false, 0, 0
 	}
 
-	domainLen := len(speedTestHost)
+	domainLen := len(testHost)
 	req := make([]byte, 0, 4+1+domainLen+2)
 	req = append(req, 0x05, 0x01, 0x00, 0x03, byte(domainLen))
-	req = append(req, []byte(speedTestHost)...)
-	req = append(req, byte(speedTestPort>>8), byte(speedTestPort))
+	req = append(req, []byte(testHost)...)
+	req = append(req, byte(testPort>>8), byte(testPort))
 	conn.Write(req)
 	resp = make([]byte, 4)
 	if _, err := io.ReadFull(conn, resp); err != nil || resp[1] != 0x00 {
-		return 0
+		return false, 0, 0
 	}
 	switch resp[3] {
 	case 0x01:
@@ -590,20 +586,22 @@ func socks5SpeedTest(proxyHost string, proxyPort int, timeout time.Duration) flo
 		io.ReadFull(conn, make([]byte, 18))
 	}
 
-	httpReq := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Mozilla/5.0 (compatible; Speed-Test/1.0)\r\nConnection: close\r\n\r\n", speedTestPath, speedTestHost)
+	httpReq := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Mozilla/5.0 (compatible; Speed-Test/1.0)\r\nConnection: close\r\n\r\n", testPath, testHost)
 	conn.Write([]byte(httpReq))
 
+	start := time.Now()
 	reader := bufio.NewReader(conn)
 	_, err = reader.ReadString('\n')
 	if err != nil {
-		return 0
+		return false, 0, 0
 	}
+	latencyMs := time.Since(start).Milliseconds()
 
 	var contentLength int64
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			return 0
+			return false, latencyMs, 0
 		}
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -614,92 +612,23 @@ func socks5SpeedTest(proxyHost string, proxyPort int, timeout time.Duration) flo
 		}
 	}
 	if contentLength == 0 {
-		return 0
+		return false, latencyMs, 0
 	}
 
-	start := time.Now()
+	downloadStart := time.Now()
 	written, _ := io.Copy(io.Discard, reader)
-	elapsed := time.Since(start)
-	if written == 0 {
-		return 0
+	downloadElapsed := time.Since(downloadStart)
+	if written < contentLength/2 {
+		return true, latencyMs, 0
 	}
 
 	megabits := float64(written) * 8.0 / 1_000_000.0
-	seconds := elapsed.Seconds()
-	if seconds <= 0 {
-		return 0
+	seconds := downloadElapsed.Seconds()
+	speed := 0.0
+	if seconds > 0 {
+		speed = math.Round(megabits/seconds*100) / 100
 	}
-	speed := megabits / seconds
-	return math.Round(speed*100) / 100
-}
-
-func socks5Connect(proxyHost string, proxyPort int, targetHost string, targetPort int, timeout time.Duration) (bool, error) {
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", proxyHost, proxyPort), timeout)
-	if err != nil {
-		return false, fmt.Errorf("socks5 dial: %w", err)
-	}
-	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(timeout))
-
-	if _, err := conn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
-		return false, fmt.Errorf("socks5 handshake write: %w", err)
-	}
-	resp := make([]byte, 2)
-	if _, err := io.ReadFull(conn, resp); err != nil {
-		return false, fmt.Errorf("socks5 handshake read: %w", err)
-	}
-	if resp[0] != 0x05 || resp[1] != 0x00 {
-		return false, fmt.Errorf("socks5 handshake rejected: %v", resp)
-	}
-
-	domainLen := len(targetHost)
-	req := make([]byte, 0, 4+1+domainLen+2)
-	req = append(req, 0x05, 0x01, 0x00, 0x03, byte(domainLen))
-	req = append(req, []byte(targetHost)...)
-	req = append(req, byte(targetPort>>8), byte(targetPort))
-	if _, err := conn.Write(req); err != nil {
-		return false, fmt.Errorf("socks5 connect write: %w", err)
-	}
-
-	resp = make([]byte, 4)
-	if _, err := io.ReadFull(conn, resp); err != nil {
-		return false, fmt.Errorf("socks5 connect read: %w", err)
-	}
-	if resp[1] != 0x00 {
-		return false, fmt.Errorf("socks5 connect rejected: code %d", resp[1])
-	}
-	// drain the remaining SOCKS5 response (bind address + port)
-	switch resp[3] {
-	case 0x01: // IPv4 - 4 bytes addr + 2 bytes port
-		io.ReadFull(conn, make([]byte, 6))
-	case 0x03: // domain - 1 byte len + len bytes addr + 2 bytes port
-		domainLenResp := make([]byte, 1)
-		io.ReadFull(conn, domainLenResp)
-		io.ReadFull(conn, make([]byte, int(domainLenResp[0])+2))
-	case 0x04: // IPv6 - 16 bytes addr + 2 bytes port
-		io.ReadFull(conn, make([]byte, 18))
-	}
-
-	httpReq := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Mozilla/5.0 (compatible; Proxy-Test/1.0)\r\nConnection: close\r\n\r\n", testPath, testHost)
-	if _, err := conn.Write([]byte(httpReq)); err != nil {
-		return false, fmt.Errorf("http write: %w", err)
-	}
-
-	reader := bufio.NewReader(conn)
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		return false, fmt.Errorf("http read: %w", err)
-	}
-
-	if len(response) < 9 {
-		return false, fmt.Errorf("invalid http response: %s", response)
-	}
-	statusCode := strings.TrimSpace(response[9:12])
-	code, _ := strconv.Atoi(statusCode)
-	if code >= 200 && code < 400 {
-		return true, nil
-	}
-	return false, fmt.Errorf("http status %s", statusCode)
+	return true, latencyMs, speed
 }
 
 type xrayInstance struct {
@@ -761,9 +690,7 @@ func testXrayBatch(proxies []ParsedProxy, indices []int, results []TestResult) {
 		testWg.Add(1)
 		go func(idx int, inst *xrayInstance, p ParsedProxy) {
 			defer func() { <-testSem; testWg.Done() }()
-			start := time.Now()
-			ok, _ := socks5Connect("127.0.0.1", inst.socksPort, testHost, testPort, testTimeout)
-			lat := time.Since(start).Milliseconds()
+			ok, lat, speed := socks5CombinedTest("127.0.0.1", inst.socksPort, testTimeout)
 			errStr := ""
 			if !ok {
 				errStr = "proxy test failed"
@@ -776,34 +703,13 @@ func testXrayBatch(proxies []ParsedProxy, indices []int, results []TestResult) {
 				Port:      p.Port,
 				Working:   ok,
 				LatencyMs: lat,
+				SpeedMbps: speed,
 				Error:     errStr,
 			}
 			mu.Unlock()
 		}(indices[i], inst, proxies[i])
 	}
 	testWg.Wait()
-
-	// Phase 2: Speed test for working proxies
-	speedTestSem := make(chan struct{}, 20)
-	var speedWg sync.WaitGroup
-	for i, inst := range instances {
-		if inst == nil {
-			continue
-		}
-		speedTestSem <- struct{}{}
-		speedWg.Add(1)
-		go func(idx int, inst *xrayInstance) {
-			defer func() { <-speedTestSem; speedWg.Done() }()
-			if !results[idx].Working {
-				return
-			}
-			speed := socks5SpeedTest("127.0.0.1", inst.socksPort, speedTestTimeout)
-			if speed > 0 {
-				results[idx].SpeedMbps = speed
-			}
-		}(indices[i], inst)
-	}
-	speedWg.Wait()
 
 	for _, inst := range instances {
 		if inst != nil && inst.cmd != nil && inst.cmd.Process != nil {

@@ -56,7 +56,7 @@ func TestGenerateSingboxProfileIncludesMatchingShadowsocksOutbound(t *testing.T)
 	user := models.User{ID: 10002, UUID: "user-2", Email: "two@example.com", Enabled: true}
 	node := models.Node{Name: "webdock", PublicHost: "92.113.148.36", Enabled: true}
 
-	payload, err := GenerateSingboxProfile(user, []models.Node{node}, services.ProtocolSettings{})
+	payload, err := GenerateSingboxProfile(user, []models.Node{node}, services.ProtocolSettings{}, nil)
 	if err != nil {
 		t.Fatalf("GenerateSingboxProfile() error = %v", err)
 	}
@@ -142,7 +142,7 @@ func TestGenerateSingboxProfileIncludesDirectInSelectorButNotAutoUrltestGroup(t 
 	user := models.User{ID: 10003, UUID: "user-4", Email: "four@example.com", Enabled: true}
 	node := models.Node{Name: "webdock", PublicHost: "92.113.148.36", Enabled: true}
 
-	payload, err := GenerateSingboxProfile(user, []models.Node{node}, services.ProtocolSettings{})
+	payload, err := GenerateSingboxProfile(user, []models.Node{node}, services.ProtocolSettings{}, nil)
 	if err != nil {
 		t.Fatalf("GenerateSingboxProfile() error = %v", err)
 	}
@@ -193,7 +193,7 @@ func TestGenerateSingboxProfileIncludesDNSSupportForDirectMode(t *testing.T) {
 	user := models.User{ID: 10004, UUID: "user-5", Email: "five@example.com", Enabled: true}
 	node := models.Node{Name: "webdock", PublicHost: "92.113.148.36", Enabled: true}
 
-	payload, err := GenerateSingboxProfile(user, []models.Node{node}, services.ProtocolSettings{})
+	payload, err := GenerateSingboxProfile(user, []models.Node{node}, services.ProtocolSettings{}, nil)
 	if err != nil {
 		t.Fatalf("GenerateSingboxProfile() error = %v", err)
 	}
@@ -281,7 +281,7 @@ func TestGenerateSingboxProfileIncludesConfiguredRoutingRules(t *testing.T) {
 		ProxyDomains:   []string{"facebook.com", "fbcdn.net"},
 	}
 
-	payload, err := GenerateSingboxProfile(user, []models.Node{node}, settings)
+	payload, err := GenerateSingboxProfile(user, []models.Node{node}, settings, nil)
 	if err != nil {
 		t.Fatalf("GenerateSingboxProfile() error = %v", err)
 	}
