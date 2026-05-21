@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -547,7 +548,7 @@ func (h *Handler) collectIntegrationWorkingProxies(max int) []map[string]interfa
 			if cfg == nil {
 				continue
 			}
-			cfg["tag"] = w.Tag
+			cfg["tag"] = fmt.Sprintf("%04d", len(result)+1)
 			result = append(result, cfg)
 			if len(result) >= max {
 				return result
