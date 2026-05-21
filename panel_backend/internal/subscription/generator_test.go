@@ -207,8 +207,28 @@ func TestGenerateSingboxProfileIncludesDNSSupportForDirectMode(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected dns config in profile, got %#v", profile["dns"])
 	}
-	if dnsConfig["final"] != "local-dns" {
-		t.Fatalf("expected dns.final=local-dns, got %#v", dnsConfig["final"])
+	if dnsConfig["final"] != "proxy-dns" {
+		t.Fatalf("expected dns.final=proxy-dns, got %#v", dnsConfig["final"])
+	}
+	if dnsConfig["fakeip"] == nil {
+		servers, ok := dnsConfig["servers"].([]interface{})
+		if !ok {
+			t.Fatalf("expected dns.servers, got %#v", dnsConfig["servers"])
+		}
+		hasFakeIP := false
+		for _, s := range servers {
+			sv, ok := s.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if sv["type"] == "fakeip" {
+				hasFakeIP = true
+				break
+			}
+		}
+		if !hasFakeIP {
+			t.Fatalf("expected a fakeip dns server, got %#v", servers)
+		}
 	}
 
 	inbounds, ok := profile["inbounds"].([]interface{})

@@ -137,14 +137,37 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 
 	return map[string]interface{}{
 		"dns": map[string]interface{}{
+			"final":    "proxy-dns",
+			"strategy": "prefer_ipv4",
 			"servers": []map[string]interface{}{
 				{
-					"type": "local",
 					"tag":  "local-dns",
+					"type": "local",
+				},
+				{
+					"tag":    "proxy-dns",
+					"type":   "https",
+					"server": "dns.quad9.net",
+					"detour": "proxy",
+				},
+				{
+					"tag":         "fakeip-dns",
+					"type":        "fakeip",
+					"inet4_range": "198.18.0.0/16",
+					"inet6_range": "fc00::/18",
 				},
 			},
-			"final":    "local-dns",
-			"strategy": "prefer_ipv4",
+			"rules": []map[string]interface{}{
+				{
+					"domain":        []string{"+.lan", "+.local", "localhost", "*.msftncsi.com", "*.msftconnecttest.com", "time.*.com", "ntp.*.com"},
+					"server":        "local-dns",
+					"disable_cache": true,
+				},
+				{
+					"rule_set": []string{"geosite-cn"},
+					"server":   "local-dns",
+				},
+			},
 		},
 		"inbounds": []map[string]interface{}{
 			{
@@ -153,6 +176,12 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 				"auto_route":               true,
 				"endpoint_independent_nat": false,
 				"mtu":                      1400,
+				"stack":                    "system",
+				"strict_route":             true,
+				"sniff":                    true,
+				"sniff_override_destination": false,
+				"sniff_timeout":             "300ms",
+				"domain_strategy": "prefer_ipv4",
 				"platform": map[string]interface{}{
 					"http_proxy": map[string]interface{}{
 						"enabled":     true,
@@ -160,22 +189,43 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 						"server_port": 2080,
 					},
 				},
-				"stack":        "system",
-				"strict_route": true,
 			},
 			{
-				"type":        "mixed",
-				"listen":      "127.0.0.1",
-				"listen_port": 2080,
-				"users":       []interface{}{},
+				"type":                      "mixed",
+				"listen":                    "127.0.0.1",
+				"listen_port":               2080,
+				"users":                     []interface{}{},
+				"sniff":                     true,
+				"sniff_override_destination": false,
 			},
 		},
 		"outbounds": outbounds,
-		"route": map[string]interface{}{
+			"route": map[string]interface{}{
 			"auto_detect_interface":   true,
 			"default_domain_resolver": "local-dns",
 			"final":                   "proxy",
+			"rule_set": []map[string]interface{}{
+				{
+					"type":   "remote",
+					"tag":    "geosite-cn",
+					"format": "binary",
+					"url":    "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+				},
+				{
+					"type":   "remote",
+					"tag":    "geosite-private",
+					"format": "binary",
+					"url":    "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-private.srs",
+				},
+			},
 			"rules":                   buildSingboxRouteRules(settings),
+		},
+		"experimental": map[string]interface{}{
+			"cache_file": map[string]interface{}{
+				"enabled":    true,
+				"path":       "cache.db",
+				"cache_id":   "singbox",
+			},
 		},
 	}
 }
@@ -186,16 +236,7 @@ func buildSingboxRouteRules(settings services.ProtocolSettings) []map[string]int
 			"action": "sniff",
 		},
 		{
-			"type": "logical",
-			"mode": "or",
-			"rules": []map[string]interface{}{
-				{
-					"protocol": "dns",
-				},
-				{
-					"port": 53,
-				},
-			},
+			"port":   53,
 			"action": "hijack-dns",
 		},
 	}
@@ -226,6 +267,21 @@ func buildSingboxRouteRules(settings services.ProtocolSettings) []map[string]int
 		"action":     "route",
 		"clash_mode": "Direct",
 		"outbound":   "direct",
+	})
+
+	rules = append(rules, map[string]interface{}{
+		"type":   "logical",
+		"mode":   "and",
+		"outbound": "direct",
+		"rules": []map[string]interface{}{
+			{
+				"rule_set": []string{"geosite-cn"},
+			},
+			{
+				"invert":   true,
+				"rule_set": []string{"geosite-private"},
+			},
+		},
 	})
 
 	return rules
