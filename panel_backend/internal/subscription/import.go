@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"bufio"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
@@ -9,8 +10,13 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -358,32 +364,316 @@ func parseTUIC(u *url.URL, raw, remark string) *ParsedProxy {
 	return p
 }
 
-func TestAll(proxies []ParsedProxy) []TestResult {
-	return TestAllWithConcurrency(proxies, 100)
+const (
+	testHost       = "www.gstatic.com"
+	testPath       = "/generate_204"
+	testPort       = 80
+	testTimeout    = 15 * time.Second
+	xrayStartWait  = 800 * time.Millisecond
+	xrayStartLimit  = 50
+	xraySocksLimit  = 100
+)
+
+var xrayPaths = []string{
+	"/usr/local/bin/xray",
+	"/usr/local/xray/xray",
+	"/opt/homebrew/bin/xray",
 }
 
-func TestAllWithConcurrency(proxies []ParsedProxy, concurrency int) []TestResult {
-	if len(proxies) == 0 {
-		return nil
+var socksPortCounter uint32 = 19000
+
+func findXrayBinary() string {
+	for _, p := range xrayPaths {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	if path, err := exec.LookPath("xray"); err == nil {
+		return path
+	}
+	return ""
+}
+
+func nextSocksPort() int {
+	return int(atomic.AddUint32(&socksPortCounter, 1))
+}
+
+func isXraySupported(p ParsedProxy) bool {
+	switch p.Protocol {
+	case "vless", "vmess", "trojan", "shadowsocks":
+		return true
+	}
+	return false
+}
+
+func buildXrayConfig(p ParsedProxy, socksPort int) map[string]interface{} {
+	inbound := map[string]interface{}{
+		"port":     socksPort,
+		"listen":   "127.0.0.1",
+		"protocol": "socks",
+		"settings": map[string]interface{}{
+			"auth": "noauth",
+			"udp":  false,
+		},
 	}
 
-	results := make([]TestResult, len(proxies))
-	sem := make(chan struct{}, concurrency)
-	var mu sync.Mutex
-	var wg sync.WaitGroup
+	return map[string]interface{}{
+		"inbounds":  []map[string]interface{}{inbound},
+		"outbounds": []map[string]interface{}{buildXrayOutbound(p)},
+		"log":       map[string]interface{}{"loglevel": "error"},
+	}
+}
+
+func buildXrayOutbound(p ParsedProxy) map[string]interface{} {
+	streamSettings := buildXrayStreamSettings(p)
+
+	switch p.Protocol {
+	case "vless":
+		return map[string]interface{}{
+			"protocol": "vless",
+			"settings": map[string]interface{}{
+				"vnext": []map[string]interface{}{
+					{
+						"address": p.Host,
+						"port":    p.Port,
+						"users": []map[string]interface{}{
+							{
+								"id":         p.UUID,
+								"flow":       p.Flow,
+								"encryption": "none",
+							},
+						},
+					},
+				},
+			},
+			"streamSettings": streamSettings,
+		}
+	case "vmess":
+		return map[string]interface{}{
+			"protocol": "vmess",
+			"settings": map[string]interface{}{
+				"vnext": []map[string]interface{}{
+					{
+						"address": p.Host,
+						"port":    p.Port,
+						"users": []map[string]interface{}{
+							{
+								"id": p.UUID,
+							},
+						},
+					},
+				},
+			},
+			"streamSettings": streamSettings,
+		}
+	case "trojan":
+		return map[string]interface{}{
+			"protocol": "trojan",
+			"settings": map[string]interface{}{
+				"servers": []map[string]interface{}{
+					{
+						"address":  p.Host,
+						"port":     p.Port,
+						"password": p.Password,
+					},
+				},
+			},
+			"streamSettings": streamSettings,
+		}
+	case "shadowsocks":
+		method := p.Method
+		if method == "" {
+			method = "aes-256-gcm"
+		}
+		return map[string]interface{}{
+			"protocol": "shadowsocks",
+			"settings": map[string]interface{}{
+				"servers": []map[string]interface{}{
+					{
+						"address":  p.Host,
+						"port":     p.Port,
+						"method":   method,
+						"password": p.Password,
+					},
+				},
+			},
+			"streamSettings": streamSettings,
+		}
+	}
+	return nil
+}
+
+func buildXrayStreamSettings(p ParsedProxy) map[string]interface{} {
+	settings := map[string]interface{}{
+		"network":  p.Network,
+		"security": p.Security,
+	}
+
+	if p.Network == "ws" {
+		wsSettings := map[string]interface{}{
+			"path": p.Path,
+		}
+		if p.SNI != "" {
+			wsSettings["headers"] = map[string]interface{}{
+				"Host": p.SNI,
+			}
+		}
+		settings["wsSettings"] = wsSettings
+	}
+
+	if p.Security == "tls" || p.Security == "reality" {
+		sni := p.SNI
+		if sni == "" {
+			sni = p.Host
+		}
+		if p.Security == "tls" {
+			settings["tlsSettings"] = map[string]interface{}{
+				"serverName": sni,
+			}
+		} else if p.Security == "reality" {
+			realitySettings := map[string]interface{}{
+				"serverName":  sni,
+				"fingerprint": "chrome",
+			}
+			if p.PublicKey != "" {
+				realitySettings["publicKey"] = p.PublicKey
+			}
+			if p.ShortID != "" {
+				realitySettings["shortId"] = p.ShortID
+			}
+			settings["realitySettings"] = realitySettings
+		}
+	}
+
+	return settings
+}
+
+func socks5Connect(proxyHost string, proxyPort int, targetHost string, targetPort int, timeout time.Duration) (bool, error) {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", proxyHost, proxyPort), timeout)
+	if err != nil {
+		return false, fmt.Errorf("socks5 dial: %w", err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(timeout))
+
+	if _, err := conn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
+		return false, fmt.Errorf("socks5 handshake write: %w", err)
+	}
+	resp := make([]byte, 2)
+	if _, err := io.ReadFull(conn, resp); err != nil {
+		return false, fmt.Errorf("socks5 handshake read: %w", err)
+	}
+	if resp[0] != 0x05 || resp[1] != 0x00 {
+		return false, fmt.Errorf("socks5 handshake rejected: %v", resp)
+	}
+
+	domainLen := len(targetHost)
+	req := make([]byte, 0, 4+1+domainLen+2)
+	req = append(req, 0x05, 0x01, 0x00, 0x03, byte(domainLen))
+	req = append(req, []byte(targetHost)...)
+	req = append(req, byte(targetPort>>8), byte(targetPort))
+	if _, err := conn.Write(req); err != nil {
+		return false, fmt.Errorf("socks5 connect write: %w", err)
+	}
+
+	resp = make([]byte, 4)
+	if _, err := io.ReadFull(conn, resp); err != nil {
+		return false, fmt.Errorf("socks5 connect read: %w", err)
+	}
+	if resp[1] != 0x00 {
+		return false, fmt.Errorf("socks5 connect rejected: code %d", resp[1])
+	}
+
+	httpReq := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Mozilla/5.0 (compatible; Proxy-Test/1.0)\r\nConnection: close\r\n\r\n", testPath, testHost)
+	if _, err := conn.Write([]byte(httpReq)); err != nil {
+		return false, fmt.Errorf("http write: %w", err)
+	}
+
+	reader := bufio.NewReader(conn)
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return false, fmt.Errorf("http read: %w", err)
+	}
+
+	if len(response) < 9 {
+		return false, fmt.Errorf("invalid http response: %s", response)
+	}
+	statusCode := strings.TrimSpace(response[9:12])
+	code, _ := strconv.Atoi(statusCode)
+	if code >= 200 && code < 400 {
+		return true, nil
+	}
+	return false, fmt.Errorf("http status %s", statusCode)
+}
+
+type xrayInstance struct {
+	cmd        *exec.Cmd
+	socksPort  int
+	configPath string
+}
+
+func testXrayBatch(proxies []ParsedProxy, indices []int, results []TestResult) {
+	xrayBin := findXrayBinary()
+	if xrayBin == "" {
+		for i, p := range proxies {
+			ok, lat := basicTest(p)
+			results[indices[i]] = TestResult{
+				URI:       p.RawURI,
+				Protocol:  p.Protocol,
+				Host:      p.Host,
+				Port:      p.Port,
+				Working:   ok,
+				LatencyMs: lat,
+			}
+		}
+		return
+	}
+
+	instances := make([]*xrayInstance, len(proxies))
+	var startWg sync.WaitGroup
+	startSem := make(chan struct{}, xrayStartLimit)
 
 	for i, p := range proxies {
-		sem <- struct{}{}
-		wg.Add(1)
+		startSem <- struct{}{}
+		startWg.Add(1)
 		go func(i int, p ParsedProxy) {
-			defer func() { <-sem; wg.Done() }()
-			ok, lat := basicTest(p)
+			defer func() { <-startSem; startWg.Done() }()
+			socksPort := nextSocksPort()
+			config := buildXrayConfig(p, socksPort)
+			configJSON, _ := json.Marshal(config)
+			configPath := filepath.Join(os.TempDir(), fmt.Sprintf("xray_%d_%d.json", time.Now().UnixNano(), socksPort))
+			os.WriteFile(configPath, configJSON, 0644)
+
+			cmd := exec.Command(xrayBin, "run", "-config", configPath)
+			cmd.Start()
+			instances[i] = &xrayInstance{cmd: cmd, socksPort: socksPort, configPath: configPath}
+		}(i, p)
+	}
+	startWg.Wait()
+
+	time.Sleep(xrayStartWait)
+
+	var testWg sync.WaitGroup
+	testSem := make(chan struct{}, xraySocksLimit)
+	var mu sync.Mutex
+
+	for i, inst := range instances {
+		if inst == nil {
+			continue
+		}
+		testSem <- struct{}{}
+		testWg.Add(1)
+		go func(idx int, inst *xrayInstance, p ParsedProxy) {
+			defer func() { <-testSem; testWg.Done() }()
+			start := time.Now()
+			ok, _ := socks5Connect("127.0.0.1", inst.socksPort, testHost, testPort, testTimeout)
+			lat := time.Since(start).Milliseconds()
 			errStr := ""
 			if !ok {
-				errStr = "tcp/tls handshake failed"
+				errStr = "proxy test failed"
 			}
 			mu.Lock()
-			results[i] = TestResult{
+			results[idx] = TestResult{
 				URI:       p.RawURI,
 				Protocol:  p.Protocol,
 				Host:      p.Host,
@@ -393,11 +683,82 @@ func TestAllWithConcurrency(proxies []ParsedProxy, concurrency int) []TestResult
 				Error:     errStr,
 			}
 			mu.Unlock()
+		}(indices[i], inst, proxies[i])
+	}
+	testWg.Wait()
+
+	for _, inst := range instances {
+		if inst != nil && inst.cmd != nil && inst.cmd.Process != nil {
+			inst.cmd.Process.Kill()
+			os.Remove(inst.configPath)
+		}
+	}
+}
+
+func TestAll(proxies []ParsedProxy) []TestResult {
+	return TestAllWithConcurrency(proxies, 1000)
+}
+
+func TestAllWithConcurrency(proxies []ParsedProxy, batchSize int) []TestResult {
+	if len(proxies) == 0 {
+		return nil
+	}
+
+	results := make([]TestResult, len(proxies))
+
+	var xrayIdxs, basicIdxs []int
+	var xrayProxies, basicProxies []ParsedProxy
+
+	for i, p := range proxies {
+		if isXraySupported(p) {
+			xrayProxies = append(xrayProxies, p)
+			xrayIdxs = append(xrayIdxs, i)
+		} else {
+			basicProxies = append(basicProxies, p)
+			basicIdxs = append(basicIdxs, i)
+		}
+	}
+
+	for i := 0; i < len(xrayProxies); i += batchSize {
+		end := i + batchSize
+		if end > len(xrayProxies) {
+			end = len(xrayProxies)
+		}
+		testXrayBatch(xrayProxies[i:end], xrayIdxs[i:end], results)
+	}
+
+	fillResults(results, basicProxies, basicIdxs)
+
+	return results
+}
+
+func fillResults(results []TestResult, proxies []ParsedProxy, indices []int) {
+	if len(proxies) == 0 {
+		return
+	}
+	sem := make(chan struct{}, 100)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for i, p := range proxies {
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(i int, p ParsedProxy) {
+			defer func() { <-sem; wg.Done() }()
+			ok, lat := basicTest(p)
+			mu.Lock()
+			results[indices[i]] = TestResult{
+				URI:       p.RawURI,
+				Protocol:  p.Protocol,
+				Host:      p.Host,
+				Port:      p.Port,
+				Working:   ok,
+				LatencyMs: lat,
+			}
+			mu.Unlock()
 		}(i, p)
 	}
 	wg.Wait()
-
-	return results
 }
 
 func basicTest(p ParsedProxy) (bool, int64) {

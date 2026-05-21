@@ -19,6 +19,10 @@ jobs:
         with:
           go-version-file: panel_backend/go.mod
 
+      - name: Install xray-core
+        run: |
+          bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
+
       - name: Run sub integration tests
         env:
           API_URL: ${{ secrets.PANEL_API_URL }}
