@@ -21,7 +21,10 @@ jobs:
 
       - name: Install xray-core
         run: |
-          bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
+          curl -L -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
+          unzip -o /tmp/xray.zip -d /tmp/xray
+          sudo mv /tmp/xray/xray /usr/local/bin/
+          chmod +x /usr/local/bin/xray
 
       - name: Run sub integration tests
         env:
