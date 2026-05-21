@@ -527,12 +527,12 @@ func (h *Handler) listAllIntegrationTests(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"integrations": list})
 }
 
-func (h *Handler) collectIntegrationWorkingProxies(max int) []map[string]interface{} {
+func (h *Handler) collectIntegrationWorkingProxies() []map[string]interface{} {
 	integrations, err := h.integrationService.List()
 	if err != nil {
 		return nil
 	}
-	result := make([]map[string]interface{}, 0, max)
+	result := make([]map[string]interface{}, 0)
 	for _, integ := range integrations {
 		if integ.Status == models.IntegrationStatusPending || integ.Result == "" {
 			continue
@@ -550,12 +550,6 @@ func (h *Handler) collectIntegrationWorkingProxies(max int) []map[string]interfa
 			}
 			cfg["tag"] = fmt.Sprintf("%04d", len(result)+1)
 			result = append(result, cfg)
-			if len(result) >= max {
-				return result
-			}
-		}
-		if len(result) >= max {
-			return result
 		}
 	}
 	return result
@@ -1199,7 +1193,7 @@ func (h *Handler) getSingboxProfile(c *gin.Context) {
 		return
 	}
 
-	extraOutbounds := h.collectIntegrationWorkingProxies(100)
+	extraOutbounds := h.collectIntegrationWorkingProxies()
 
 	if strings.EqualFold(c.Query("format"), "clash") {
 		profile, err := subscription.GenerateClashProfile(*user, nodes, protocolSettings)
