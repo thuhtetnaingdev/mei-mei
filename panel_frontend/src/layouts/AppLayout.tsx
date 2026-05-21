@@ -11,6 +11,7 @@ const nav = [
   { to: "/miners", label: "Miners", shortLabel: "Mine" },
   { to: "/users", label: "Users", shortLabel: "Users" },
   { to: "/nodes", label: "Nodes", shortLabel: "Nodes" },
+  { to: "/integrations", label: "Sub Integration", shortLabel: "Integ" },
   { to: "/settings", label: "Settings", shortLabel: "Prefs" }
 ];
 

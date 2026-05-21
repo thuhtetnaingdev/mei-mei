@@ -79,7 +79,9 @@ func main() {
 		autoFixEnabled,
 	)
 
-	router := api.NewRouterWithServices(cfg, database, userService, nodeService, collector, userClassificationService, userClassificationScheduler, realityKeyVerificationService, realityKeyScheduler)
+	integrationService := services.NewIntegrationService(database)
+
+	router := api.NewRouterWithServices(cfg, database, userService, nodeService, collector, userClassificationService, userClassificationScheduler, realityKeyVerificationService, realityKeyScheduler, integrationService)
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
 	server := &http.Server{

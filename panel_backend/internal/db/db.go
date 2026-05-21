@@ -37,6 +37,7 @@ func Connect(databasePath string) (*gorm.DB, error) {
 		&models.MintPoolState{},
 		&models.MintPoolEvent{},
 		&models.MintPoolTransferEvent{},
+		&models.SubscriptionIntegration{},
 	); err != nil {
 		return nil, err
 	}

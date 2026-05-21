@@ -10,6 +10,7 @@ import { NodesPage } from "./pages/NodesPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { UsersPage } from "./pages/UsersPage";
 import { PublicUserPage } from "./pages/PublicUserPage";
+import { IntegrationsPage } from "./pages/IntegrationsPage";
 
 export default function App() {
   return (
@@ -28,6 +29,7 @@ export default function App() {
           <Route path="/users" element={<UsersPage />} />
           <Route path="/nodes" element={<NodesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/integrations" element={<IntegrationsPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -21,6 +22,25 @@ import (
 	"gorm.io/gorm"
 )
 
+func ciAuthMiddleware(cfg config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if cfg.CIToken == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "CI token not configured"})
+			return
+		}
+		token := c.GetHeader("X-CI-Token")
+		if token == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing X-CI-Token header"})
+			return
+		}
+		if token != cfg.CIToken {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid CI token"})
+			return
+		}
+		c.Next()
+	}
+}
+
 type Handler struct {
 	cfg                             config.Config
 	jwt                             *auth.JWTManager
@@ -36,6 +56,7 @@ type Handler struct {
 	userClassificationScheduler     *services.UserClassificationScheduler
 	realityKeyVerificationService   *services.RealityKeyVerificationService
 	realityKeyVerificationScheduler *services.RealityKeyVerificationScheduler
+	integrationService               *services.IntegrationService
 }
 
 func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
@@ -53,10 +74,11 @@ func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 	userClassificationScheduler := services.NewUserClassificationScheduler(userClassificationService, 24*time.Hour)
 	realityKeyVerificationService := services.NewRealityKeyVerificationService(db, nodeService, cfg.NodeSharedToken, 30*time.Second)
 	realityKeyVerificationScheduler := services.NewRealityKeyVerificationScheduler(realityKeyVerificationService, 6, true)
-	return NewRouterWithServices(cfg, db, userService, nodeService, bandwidthCollector, userClassificationService, userClassificationScheduler, realityKeyVerificationService, realityKeyVerificationScheduler)
+	integrationService := services.NewIntegrationService(db)
+	return NewRouterWithServices(cfg, db, userService, nodeService, bandwidthCollector, userClassificationService, userClassificationScheduler, realityKeyVerificationService, realityKeyVerificationScheduler, integrationService)
 }
 
-func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services.UserService, nodeService *services.NodeService, bandwidthCollector *services.BandwidthCollectorService, userClassificationService *services.UserClassificationService, userClassificationScheduler *services.UserClassificationScheduler, realityKeyVerificationService *services.RealityKeyVerificationService, realityKeyVerificationScheduler *services.RealityKeyVerificationScheduler) *gin.Engine {
+func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services.UserService, nodeService *services.NodeService, bandwidthCollector *services.BandwidthCollectorService, userClassificationService *services.UserClassificationService, userClassificationScheduler *services.UserClassificationScheduler, realityKeyVerificationService *services.RealityKeyVerificationService, realityKeyVerificationScheduler *services.RealityKeyVerificationScheduler, integrationService *services.IntegrationService) *gin.Engine {
 	router := gin.Default()
 	router.Use(cors.New(cors.Config{
 		AllowOrigins: cfg.AllowedOrigins,
@@ -80,6 +102,7 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 		userClassificationScheduler:     userClassificationScheduler,
 		realityKeyVerificationService:   realityKeyVerificationService,
 		realityKeyVerificationScheduler: realityKeyVerificationScheduler,
+		integrationService:               integrationService,
 	}
 
 	router.GET("/health", func(c *gin.Context) {
@@ -146,6 +169,10 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 		protected.POST("/users/classify", handler.triggerUserClassification)
 		protected.GET("/users/classification/stats", handler.getUserClassificationStats)
 		protected.GET("/users/classification/status", handler.getUserClassificationStatus)
+		protected.POST("/integration/import", handler.importSubscriptionIntegration)
+		protected.GET("/integration", handler.listSubscriptionIntegrations)
+		protected.GET("/integration/:id", handler.getSubscriptionIntegration)
+		protected.DELETE("/integration/:id", handler.deleteSubscriptionIntegration)
 		protected.POST("/migrate/subscription", handler.importSubscription)
 		protected.GET("/admin/profile", handler.getAdminProfile)
 		protected.PUT("/admin/credentials", handler.updateAdminCredentials)
@@ -156,6 +183,15 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 		protected.GET("/mint-pool", handler.getMintPool)
 		protected.POST("/mint-pool/mint", handler.mintPool)
 		protected.DELETE("/mint-pool", handler.resetMintPool)
+	}
+
+	// CI API - authenticated via X-CI-Token header for sub integration testing
+	ciAPI := router.Group("/api/integration")
+	ciAPI.Use(ciAuthMiddleware(cfg))
+	{
+		ciAPI.GET("/test/pending", handler.getPendingIntegrationTests)
+		ciAPI.POST("/test/start/:id", handler.startIntegrationTest)
+		ciAPI.POST("/test/complete/:id", handler.completeIntegrationTest)
 	}
 
 	registerFrontendRoutes(router, cfg)
@@ -395,6 +431,136 @@ func (h *Handler) createUser(c *gin.Context) {
 
 	h.syncActiveUsersBestEffort()
 	c.JSON(http.StatusCreated, user)
+}
+
+func (h *Handler) importSubscriptionIntegration(c *gin.Context) {
+	var body struct {
+		SubscriptionURL string `json:"subscriptionUrl" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Fetch + parse only (no sing-box/xray binary testing — done by GitHub Actions cron)
+	uris, err := subscription.FetchSubscription(body.SubscriptionURL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "fetch failed: " + err.Error()})
+		return
+	}
+	if len(uris) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no valid URIs found in subscription"})
+		return
+	}
+
+	parsed := subscription.ParseAll(uris)
+	result := &subscription.ImportResult{
+		Parsed:    parsed,
+		TotalURLs: len(uris),
+	}
+
+	rj, _ := json.Marshal(result)
+	integ, err := h.integrationService.Create(body.SubscriptionURL, string(rj), 0, result.TotalURLs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, integ)
+}
+
+func (h *Handler) listSubscriptionIntegrations(c *gin.Context) {
+	list, err := h.integrationService.List()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"integrations": list})
+}
+
+func (h *Handler) getSubscriptionIntegration(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 200 {
+		pageSize = 20
+	}
+
+	detail, err := h.integrationService.GetDetail(c.Param("id"), page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, detail)
+}
+
+func (h *Handler) deleteSubscriptionIntegration(c *gin.Context) {
+	if err := h.integrationService.Delete(c.Param("id")); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) getPendingIntegrationTests(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	if limit < 1 || limit > 100 {
+		limit = 10
+	}
+	list, err := h.integrationService.GetPendingForTest(limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"integrations": list})
+}
+
+func (h *Handler) startIntegrationTest(c *gin.Context) {
+	var body struct {
+		TestRunID string `json:"testRunId" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.integrationService.StartTest(c.Param("id"), body.TestRunID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":  true,
+		"testRunId": body.TestRunID,
+		"startedAt": time.Now(),
+	})
+}
+
+func (h *Handler) completeIntegrationTest(c *gin.Context) {
+	var body struct {
+		TestRunID    string `json:"testRunId" binding:"required"`
+		ResultJSON   string `json:"result" binding:"required"`
+		WorkingCount int    `json:"workingCount"`
+		TotalCount   int    `json:"totalCount"`
+		Status       string `json:"status" binding:"required"`
+		ErrorMessage string `json:"errorMessage,omitempty"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.integrationService.CompleteTest(
+		c.Param("id"), body.TestRunID, body.ResultJSON,
+		body.WorkingCount, body.TotalCount, body.Status, body.ErrorMessage,
+	); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
 func (h *Handler) importSubscription(c *gin.Context) {

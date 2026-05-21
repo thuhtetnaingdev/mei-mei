@@ -23,6 +23,7 @@ type Config struct {
 	NodeSharedToken     string
 	MapToken            string
 	SyncTimeoutSeconds  int
+	CIToken             string
 }
 
 func Load() Config {
@@ -42,6 +43,7 @@ func Load() Config {
 		MapToken:            getEnv("MAP_TOKEN", ""),
 		SyncTimeoutSeconds:  getEnvAsInt("SYNC_TIMEOUT_SECONDS", 10),
 	}
+	cfg.CIToken = getEnv("CI_API_TOKEN", "")
 	cfg.BasePublicURL = getEnv("BASE_PUBLIC_URL", strings.TrimSuffix(cfg.BaseSubscriptionURL, "/subscription"))
 
 	return cfg

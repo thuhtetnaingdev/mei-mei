@@ -320,3 +320,46 @@ export interface NodeKeyStatus {
   keyMismatchDetectedAt?: string | null;
   keyMismatchAutoFixedAt?: string | null;
 }
+
+export interface ParsedProxy {
+  protocol: string;
+  host: string;
+  port: number;
+  uuid?: string;
+  password?: string;
+  method?: string;
+  flow?: string;
+  security?: string;
+  network?: string;
+  sni?: string;
+  publicKey?: string;
+  shortId?: string;
+  path?: string;
+  remark?: string;
+  rawUri: string;
+}
+
+export interface TestResult {
+  uri: string;
+  protocol: string;
+  host: string;
+  port: number;
+  working: boolean;
+  latencyMs: number;
+  error?: string;
+}
+
+export interface SingboxOutbound {
+  tag: string;
+  config: Record<string, unknown>;
+  latencyMs: number;
+  remark: string;
+}
+
+export interface ImportSubscriptionResult {
+  parsed: ParsedProxy[];
+  tested: TestResult[];
+  working: SingboxOutbound[];
+  failCount: number;
+  totalUrls: number;
+}
