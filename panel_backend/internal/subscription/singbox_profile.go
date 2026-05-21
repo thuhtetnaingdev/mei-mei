@@ -185,7 +185,7 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 				},
 			},
 		},
-		"inbounds": []map[string]interface{}{
+			"inbounds": []map[string]interface{}{
 			{
 				"type":                     "tun",
 				"address":                  []string{"172.19.0.1/30", "fdfe:dcba:9876::1/126"},
@@ -194,10 +194,6 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 				"mtu":                      1400,
 				"stack":                    "system",
 				"strict_route":             true,
-				"sniff":                    true,
-				"sniff_override_destination": false,
-				"sniff_timeout":             "300ms",
-				"domain_strategy": "prefer_ipv4",
 				"platform": map[string]interface{}{
 					"http_proxy": map[string]interface{}{
 						"enabled":     true,
@@ -207,18 +203,17 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 				},
 			},
 			{
-				"type":                      "mixed",
-				"listen":                    "127.0.0.1",
-				"listen_port":               2080,
-				"users":                     []interface{}{},
-				"sniff":                     true,
-				"sniff_override_destination": false,
+				"type":        "mixed",
+				"listen":      "127.0.0.1",
+				"listen_port": 2080,
+				"users":       []interface{}{},
 			},
 		},
 		"outbounds": outbounds,
 			"route": map[string]interface{}{
 			"auto_detect_interface":   true,
 			"default_domain_resolver": "local-dns",
+			"domain_strategy":         "prefer_ipv4",
 			"final":                   "proxy",
 			"rule_set": []map[string]interface{}{
 				{
@@ -249,7 +244,8 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 func buildSingboxRouteRules(settings services.ProtocolSettings) []map[string]interface{} {
 	rules := []map[string]interface{}{
 		{
-			"action": "sniff",
+			"action":        "sniff",
+			"sniff_timeout": "300ms",
 		},
 		{
 			"port":   53,
