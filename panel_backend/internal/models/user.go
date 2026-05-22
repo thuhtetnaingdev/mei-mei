@@ -8,6 +8,7 @@ type User struct {
 	Email                string                    `json:"email" gorm:"uniqueIndex;not null"`
 	Enabled              bool                      `json:"enabled" gorm:"default:true"`
 	IsTesting            bool                      `json:"isTesting" gorm:"default:false"`
+	SubIntegration       bool                      `json:"subIntegration" gorm:"default:true"`
 	ExpiresAt            *time.Time                `json:"expiresAt"`
 	BandwidthLimitGB     int64                     `json:"bandwidthLimitGb"`
 	BandwidthUsedBytes   int64                     `json:"bandwidthUsedBytes"`
@@ -75,6 +76,7 @@ type PublicUserResponse struct {
 	Email              string     `json:"email"`
 	Enabled            bool       `json:"enabled"`
 	IsTesting          bool       `json:"isTesting"`
+	SubIntegration     bool       `json:"subIntegration"`
 	ExpiresAt          *time.Time `json:"expiresAt,omitempty"`
 	BandwidthLimitGB   int64      `json:"bandwidthLimitGb"`
 	BandwidthUsedBytes int64      `json:"bandwidthUsedBytes"`

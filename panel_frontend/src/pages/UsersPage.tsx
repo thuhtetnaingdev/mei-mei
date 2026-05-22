@@ -56,6 +56,7 @@ type UserFormState = {
   email: string;
   enabled: boolean;
   isTesting: boolean;
+  subIntegration: boolean;
   notes: string;
   initialBandwidthGb: number;
   initialTokenAmount: number;
@@ -66,6 +67,7 @@ const defaultFormState: UserFormState = {
   email: "",
   enabled: true,
   isTesting: false,
+  subIntegration: true,
   notes: "",
   initialBandwidthGb: 100,
   initialTokenAmount: 100,
@@ -522,6 +524,7 @@ export function UsersPage() {
           email: form.email,
           enabled: form.enabled,
           isTesting: form.isTesting,
+          subIntegration: form.subIntegration,
           notes: form.notes
         });
         setFormStatus("User updated.");
@@ -535,6 +538,7 @@ export function UsersPage() {
           email: form.email,
           enabled: form.enabled,
           isTesting: form.isTesting,
+          subIntegration: form.subIntegration,
           notes: form.notes,
           bandwidthAllocations: !form.isTesting && form.initialBandwidthGb > 0 ? [
             {
@@ -604,6 +608,7 @@ export function UsersPage() {
       email: user.email,
       enabled: user.enabled,
       isTesting: user.isTesting,
+      subIntegration: user.subIntegration,
       notes: user.notes ?? "",
       initialBandwidthGb: 0,
       initialTokenAmount: 0,
@@ -1378,6 +1383,16 @@ export function UsersPage() {
                   Testing user
                 </label>
 
+                <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={form.subIntegration}
+                    onChange={(event) => setForm((current) => ({ ...current, subIntegration: event.target.checked }))}
+                    className="h-4 w-4 rounded border-white/20 bg-transparent"
+                  />
+                  Sub Integration
+                </label>
+
                 {form.isTesting ? (
                   <div className="rounded-2xl border border-amber-300/20 bg-amber-300/[0.06] px-4 py-3 text-sm text-amber-100">
                     Testing users skip credit funding and bandwidth package rules. They only sync to nodes marked testable.
@@ -1650,6 +1665,16 @@ export function UsersPage() {
                   className="h-4 w-4 rounded border-white/20 bg-transparent"
                 />
                 Testing user
+              </label>
+
+              <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={form.subIntegration}
+                  onChange={(event) => setForm((current) => ({ ...current, subIntegration: event.target.checked }))}
+                  className="h-4 w-4 rounded border-white/20 bg-transparent"
+                />
+                Sub Integration
               </label>
 
               {form.isTesting ? (

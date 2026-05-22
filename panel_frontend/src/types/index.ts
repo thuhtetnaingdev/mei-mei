@@ -6,6 +6,7 @@ export interface User {
   email: string;
   enabled: boolean;
   isTesting: boolean;
+  subIntegration: boolean;
   expiresAt?: string | null;
   bandwidthLimitGb: number;
   bandwidthUsedBytes: number;
@@ -273,6 +274,7 @@ export interface PublicUserResponse {
   email: string;
   enabled: boolean;
   isTesting: boolean;
+  subIntegration: boolean;
   expiresAt?: string | null;
   bandwidthLimitGb: number;
   bandwidthUsedBytes: number;

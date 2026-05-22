@@ -1216,7 +1216,10 @@ func (h *Handler) getSingboxProfile(c *gin.Context) {
 		return
 	}
 
-	extraOutbounds := h.collectIntegrationWorkingProxies()
+	var extraOutbounds []map[string]interface{}
+	if user.SubIntegration {
+		extraOutbounds = h.collectIntegrationWorkingProxies()
+	}
 
 	if strings.EqualFold(c.Query("format"), "clash") {
 		profile, err := subscription.GenerateClashProfile(*user, nodes, protocolSettings)

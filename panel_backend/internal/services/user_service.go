@@ -48,6 +48,7 @@ type CreateUserInput struct {
 	Email                string                         `json:"email" binding:"required,email"`
 	Enabled              *bool                          `json:"enabled"`
 	IsTesting            *bool                          `json:"isTesting"`
+	SubIntegration       *bool                          `json:"subIntegration"`
 	ExpiresAt            *time.Time                     `json:"expiresAt"`
 	BandwidthLimitGB     int64                          `json:"bandwidthLimitGb"`
 	Notes                string                         `json:"notes"`
@@ -55,10 +56,11 @@ type CreateUserInput struct {
 }
 
 type UpdateUserInput struct {
-	Email     *string `json:"email"`
-	Enabled   *bool   `json:"enabled"`
-	IsTesting *bool   `json:"isTesting"`
-	Notes     *string `json:"notes"`
+	Email          *string `json:"email"`
+	Enabled        *bool   `json:"enabled"`
+	IsTesting      *bool   `json:"isTesting"`
+	SubIntegration *bool   `json:"subIntegration"`
+	Notes          *string `json:"notes"`
 }
 
 // UserListOptions represents filtering and pagination options for user list queries
@@ -169,12 +171,18 @@ func (s *UserService) Create(input CreateUserInput) (*models.User, error) {
 		enabled = *input.Enabled
 	}
 
+	subIntegration := true
+	if input.SubIntegration != nil {
+		subIntegration = *input.SubIntegration
+	}
+
 	user := models.User{
-		UUID:      uuid.NewString(),
-		Email:     input.Email,
-		Enabled:   enabled,
-		IsTesting: isTesting,
-		Notes:     input.Notes,
+		UUID:           uuid.NewString(),
+		Email:          input.Email,
+		Enabled:        enabled,
+		IsTesting:      isTesting,
+		SubIntegration: subIntegration,
+		Notes:          input.Notes,
 	}
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
@@ -413,6 +421,7 @@ func (s *UserService) GetPublicUserByUUID(uuid string, basePublicURL string) (*m
 		Email:                user.Email,
 		Enabled:              user.Enabled,
 		IsTesting:            user.IsTesting,
+		SubIntegration:       user.SubIntegration,
 		ExpiresAt:            user.ExpiresAt,
 		BandwidthLimitGB:     user.BandwidthLimitGB,
 		BandwidthUsedBytes:   user.BandwidthUsedBytes,
@@ -486,6 +495,9 @@ func (s *UserService) Update(id string, input UpdateUserInput) (*models.User, er
 		}
 		if input.IsTesting != nil {
 			user.IsTesting = *input.IsTesting
+		}
+		if input.SubIntegration != nil {
+			user.SubIntegration = *input.SubIntegration
 		}
 		if input.Notes != nil {
 			user.Notes = *input.Notes
