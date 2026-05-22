@@ -158,7 +158,6 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 		"dns": map[string]interface{}{
 			"final":          "proxy-dns",
 			"strategy":       "prefer_ipv4",
-			"optimistic":     true,
 			"cache_capacity": 4096,
 			"servers": []map[string]interface{}{
 				{
