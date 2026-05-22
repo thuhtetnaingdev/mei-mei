@@ -1222,7 +1222,7 @@ func (h *Handler) getSingboxProfile(c *gin.Context) {
 	}
 
 	if strings.EqualFold(c.Query("format"), "clash") {
-		profile, err := subscription.GenerateClashProfile(*user, nodes, protocolSettings)
+		profile, err := subscription.GenerateClashProfile(*user, nodes, protocolSettings, extraOutbounds)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

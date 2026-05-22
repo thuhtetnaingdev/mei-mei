@@ -99,7 +99,7 @@ func TestGenerateClashProfileUsesDisableSNIForTUICIPHosts(t *testing.T) {
 	user := models.User{ID: 1, UUID: "user-1", Email: "one@example.com", Enabled: true}
 	node := models.Node{Name: "webdock", PublicHost: "92.113.148.36", Enabled: true}
 
-	payload, err := GenerateClashProfile(user, []models.Node{node}, services.ProtocolSettings{})
+	payload, err := GenerateClashProfile(user, []models.Node{node}, services.ProtocolSettings{}, nil)
 	if err != nil {
 		t.Fatalf("GenerateClashProfile() error = %v", err)
 	}

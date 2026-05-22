@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"panel_backend/internal/models"
 	"panel_backend/internal/services"
@@ -14,8 +15,8 @@ func GenerateSingboxProfile(user models.User, nodes []models.Node, settings serv
 	return json.MarshalIndent(config, "", "  ")
 }
 
-func GenerateClashProfile(user models.User, nodes []models.Node, settings services.ProtocolSettings) ([]byte, error) {
-	config := buildClashProfileConfig(user, nodes, settings)
+func GenerateClashProfile(user models.User, nodes []models.Node, settings services.ProtocolSettings, extraOutbounds []map[string]interface{}) ([]byte, error) {
+	config := buildClashProfileConfig(user, nodes, settings, extraOutbounds)
 	return yaml.Marshal(config)
 }
 
@@ -297,7 +298,7 @@ func buildSingboxRouteRules(settings services.ProtocolSettings) []map[string]int
 	return rules
 }
 
-func buildClashProfileConfig(user models.User, nodes []models.Node, settings services.ProtocolSettings) map[string]interface{} {
+func buildClashProfileConfig(user models.User, nodes []models.Node, settings services.ProtocolSettings, extraOutbounds []map[string]interface{}) map[string]interface{} {
 	availableNodes := filterAvailableNodes(user, nodes)
 	proxies := make([]map[string]interface{}, 0)
 	proxyNames := make([]string, 0)
@@ -389,6 +390,22 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		}
 	}
 
+	for _, ob := range extraOutbounds {
+		name, _ := ob["tag"].(string)
+		if name == "" {
+			if r, ok := ob["remark"].(string); ok && r != "" {
+				name = r
+			} else {
+				name = fmt.Sprintf("imported-%04d", len(proxyNames)+1)
+			}
+		}
+		proxy := singboxToClashProxy(ob, name)
+		if proxy != nil {
+			proxyNames = append(proxyNames, name)
+			proxies = append(proxies, proxy)
+		}
+	}
+
 	groupProxies := append([]string{"AUTO", "DIRECT"}, proxyNames...)
 	autoGroupProxies := proxyNames
 	if len(autoGroupProxies) == 0 {
@@ -445,4 +462,147 @@ func collectOutboundTags(user models.User, nodes []models.Node, settings service
 		return []string{"direct"}
 	}
 	return tags
+}
+
+func singboxToClashProxy(cfg map[string]interface{}, name string) map[string]interface{} {
+	proto, _ := cfg["type"].(string)
+	server, _ := cfg["server"].(string)
+	serverPort, _ := cfg["server_port"].(float64)
+
+	if server == "" || serverPort == 0 {
+		return nil
+	}
+
+	switch proto {
+	case "vless":
+		proxy := map[string]interface{}{
+			"name":             name,
+			"type":             "vless",
+			"server":           server,
+			"port":             int(serverPort),
+			"uuid":             cfg["uuid"],
+			"network":          "tcp",
+			"udp":              true,
+			"tls":              true,
+			"skip-cert-verify": true,
+		}
+		if flow, ok := cfg["flow"].(string); ok && flow != "" {
+			proxy["flow"] = flow
+		}
+		if tls, ok := cfg["tls"].(map[string]interface{}); ok {
+			if sn, ok := tls["server_name"].(string); ok && sn != "" {
+				proxy["servername"] = sn
+			}
+			if utls, ok := tls["utls"].(map[string]interface{}); ok {
+				if fp, ok := utls["fingerprint"].(string); ok && fp != "" {
+					proxy["client-fingerprint"] = fp
+				}
+			}
+			if reality, ok := tls["reality"].(map[string]interface{}); ok {
+				realityOpts := make(map[string]interface{})
+				if pk, ok := reality["public_key"].(string); ok && pk != "" {
+					realityOpts["public-key"] = pk
+				}
+				if sid, ok := reality["short_id"].(string); ok && sid != "" {
+					realityOpts["short-id"] = sid
+				}
+				if len(realityOpts) > 0 {
+					proxy["reality-opts"] = realityOpts
+				}
+			}
+		}
+		return proxy
+
+	case "vmess":
+		proxy := map[string]interface{}{
+			"name":             name,
+			"type":             "vmess",
+			"server":           server,
+			"port":             int(serverPort),
+			"uuid":             cfg["uuid"],
+			"udp":              true,
+			"skip-cert-verify": true,
+		}
+		if tls, ok := cfg["tls"].(map[string]interface{}); ok {
+			proxy["tls"] = true
+			if sn, ok := tls["server_name"].(string); ok && sn != "" {
+				proxy["servername"] = sn
+			}
+		}
+		return proxy
+
+	case "trojan":
+		proxy := map[string]interface{}{
+			"name":             name,
+			"type":             "trojan",
+			"server":           server,
+			"port":             int(serverPort),
+			"password":         cfg["password"],
+			"udp":              true,
+			"skip-cert-verify": true,
+		}
+		if tls, ok := cfg["tls"].(map[string]interface{}); ok {
+			if sn, ok := tls["server_name"].(string); ok && sn != "" {
+				proxy["sni"] = sn
+			}
+		}
+		return proxy
+
+	case "shadowsocks":
+		method, _ := cfg["method"].(string)
+		if method == "" {
+			method = "aes-256-gcm"
+		}
+		return map[string]interface{}{
+			"name":     name,
+			"type":     "ss",
+			"server":   server,
+			"port":     int(serverPort),
+			"cipher":   method,
+			"password": cfg["password"],
+			"udp":      true,
+		}
+
+	case "hysteria2":
+		proxy := map[string]interface{}{
+			"name":             name,
+			"type":             "hysteria2",
+			"server":           server,
+			"port":             int(serverPort),
+			"password":         cfg["password"],
+			"udp":              true,
+			"skip-cert-verify": true,
+		}
+		if tls, ok := cfg["tls"].(map[string]interface{}); ok {
+			if sn, ok := tls["server_name"].(string); ok && sn != "" {
+				proxy["sni"] = sn
+			}
+		}
+		if obfs, ok := cfg["obfs"].(map[string]interface{}); ok {
+			if ot, ok := obfs["type"].(string); ok && ot == "salamander" {
+				proxy["obfs"] = "salamander"
+				if op, ok := obfs["password"].(string); ok && op != "" {
+					proxy["obfs-password"] = op
+				}
+			}
+		}
+		return proxy
+
+	case "tuic":
+		return map[string]interface{}{
+			"name":                  name,
+			"type":                  "tuic",
+			"server":                server,
+			"port":                  int(serverPort),
+			"uuid":                  cfg["uuid"],
+			"password":              cfg["password"],
+			"udp":                   true,
+			"skip-cert-verify":      true,
+			"alpn":                  []string{"h3"},
+			"congestion-controller": "bbr",
+			"udp-relay-mode":        "native",
+		}
+	}
+
+	return nil
 }
