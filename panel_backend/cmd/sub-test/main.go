@@ -76,19 +76,21 @@ func main() {
 		parsed := subscription.ParseAll(uris)
 		fmt.Printf("  parsed %d proxies\n", len(parsed))
 
+		batchSize := 200
+
 		var allTested []subscription.TestResult
 		var allWorking []subscription.SingboxOutbound
 
-		for i := 0; i < len(parsed); i += 1000 {
-			end := i + 1000
+		for i := 0; i < len(parsed); i += batchSize {
+			end := i + batchSize
 			if end > len(parsed) {
 				end = len(parsed)
 			}
 
 			batch := parsed[i:end]
-			fmt.Printf("  testing batch %d/%d (%d proxies)\n", i/1000+1, (len(parsed)+999)/1000, len(batch))
+			fmt.Printf("  testing batch %d/%d (%d proxies)\n", i/batchSize+1, (len(parsed)+batchSize-1)/batchSize, len(batch))
 
-			tested := subscription.TestAllWithConcurrency(batch, 1000)
+			tested := subscription.TestAllWithConcurrency(batch, batchSize)
 			working := subscription.ConvertWorking(batch, tested)
 
 			allTested = append(allTested, tested...)
@@ -105,7 +107,7 @@ func main() {
 
 			if err := appendTest(client, apiURL, ciToken, integ.ID, testRunID,
 				testedAny, workingAny, len(allWorking), len(uris)); err != nil {
-				fmt.Fprintf(os.Stderr, "  append batch %d failed: %v\n", i/1000, err)
+				fmt.Fprintf(os.Stderr, "  append batch %d failed: %v\n", i/batchSize, err)
 				newID := fmt.Sprintf("ci-%d-%d", integ.ID, time.Now().UnixMilli())
 				if err2 := startTest(client, apiURL, ciToken, integ.ID, newID); err2 == nil {
 					testRunID = newID
