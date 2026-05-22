@@ -206,10 +206,7 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 					"server":        "block-dns",
 					"disable_cache": true,
 				},
-				{
-					"outbound": "any",
-					"server":   "local-dns",
-				},
+	
 			},
 		},
 			"inbounds": []map[string]interface{}{
