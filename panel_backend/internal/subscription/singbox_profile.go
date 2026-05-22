@@ -35,7 +35,9 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 	proxyOutbounds = append(proxyOutbounds, nodeTags...)
 	proxyOutbounds = append(proxyOutbounds, extraTags...)
 
-	urltestOutbounds := nodeTags
+	urltestOutbounds := make([]string, 0, len(nodeTags)+len(extraTags))
+	urltestOutbounds = append(urltestOutbounds, nodeTags...)
+	urltestOutbounds = append(urltestOutbounds, extraTags...)
 
 	outbounds := []map[string]interface{}{
 		{
