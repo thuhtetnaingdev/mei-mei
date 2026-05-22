@@ -106,6 +106,13 @@ func main() {
 			if err := appendTest(client, apiURL, ciToken, integ.ID, testRunID,
 				testedAny, workingAny, len(allWorking), len(uris)); err != nil {
 				fmt.Fprintf(os.Stderr, "  append batch %d failed: %v\n", i/1000, err)
+				newID := fmt.Sprintf("ci-%d-%d", integ.ID, time.Now().UnixMilli())
+				if err2 := startTest(client, apiURL, ciToken, integ.ID, newID); err2 == nil {
+					testRunID = newID
+					fmt.Printf("  restarted test run %s\n", testRunID)
+					appendTest(client, apiURL, ciToken, integ.ID, testRunID,
+						testedAny, workingAny, len(allWorking), len(uris))
+				}
 			}
 		}
 
