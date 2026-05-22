@@ -125,6 +125,7 @@ func (s *IntegrationService) StartTest(id string, testRunID string) error {
 		"status":              models.IntegrationStatusTesting,
 		"test_run_id":         testRunID,
 		"last_test_started_at": now,
+		"result":              "",
 	})
 	if result.Error != nil {
 		return result.Error
@@ -133,6 +134,43 @@ func (s *IntegrationService) StartTest(id string, testRunID string) error {
 		return fmt.Errorf("integration %s not found", id)
 	}
 	return nil
+}
+
+func (s *IntegrationService) AppendTestResult(id, testRunID string, tested, working []map[string]any, workingCount, totalCount int) error {
+	var integ models.SubscriptionIntegration
+	if err := s.db.Where("id = ? AND test_run_id = ?", id, testRunID).First(&integ).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return fmt.Errorf("integration not found or testRunID mismatch")
+		}
+		return err
+	}
+
+	result := make(map[string]any)
+	if integ.Result != "" {
+		json.Unmarshal([]byte(integ.Result), &result)
+	}
+
+	existingTested, _ := result["tested"].([]any)
+	for _, t := range tested {
+		existingTested = append(existingTested, t)
+	}
+	result["tested"] = existingTested
+
+	existingWorking, _ := result["working"].([]any)
+	for _, w := range working {
+		existingWorking = append(existingWorking, w)
+	}
+	result["working"] = existingWorking
+
+	newResultBytes, _ := json.Marshal(result)
+
+	return s.db.Model(&models.SubscriptionIntegration{}).Where(
+		"id = ? AND test_run_id = ?", id, testRunID,
+	).Updates(map[string]any{
+		"result":        string(newResultBytes),
+		"working_count": workingCount,
+		"total_count":   totalCount,
+	}).Error
 }
 
 func (s *IntegrationService) CompleteTest(id, testRunID, resultJSON string, workingCount, totalCount int, status string, errorMsg string) error {
