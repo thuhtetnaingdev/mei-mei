@@ -57,6 +57,10 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 			"type": "direct",
 			"tag":  "direct",
 		},
+		{
+			"type": "block",
+			"tag":  "block",
+		},
 	}
 
 	for _, node := range availableNodes {
