@@ -156,23 +156,35 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 
 	return map[string]interface{}{
 		"dns": map[string]interface{}{
-			"final":    "proxy-dns",
-			"strategy": "prefer_ipv4",
+			"final":          "proxy-dns",
+			"strategy":       "prefer_ipv4",
+			"optimistic":     true,
+			"cache_capacity": 4096,
 			"servers": []map[string]interface{}{
 				{
 					"tag":  "local-dns",
 					"type": "local",
 				},
 				{
-					"tag":    "proxy-dns",
-					"type":   "https",
-					"server": "dns.quad9.net",
-					"detour": "proxy",
+					"tag":              "proxy-dns",
+					"type":             "https",
+					"server":           "dns.quad9.net",
+					"server_port":      443,
+					"detour":           "proxy",
+					"domain_resolver":  "local-dns",
+				},
+				{
+					"tag":              "block-dns",
+					"type":             "https",
+					"server":           "dns.quad9.net",
+					"server_port":      443,
+					"detour":           "block",
+					"domain_resolver":  "local-dns",
 				},
 				{
 					"tag":         "fakeip-dns",
 					"type":        "fakeip",
-					"inet4_range": "198.18.0.0/16",
+					"inet4_range": "198.18.0.0/15",
 					"inet6_range": "fc00::/18",
 				},
 			},
@@ -184,6 +196,15 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 				},
 				{
 					"rule_set": []string{"geosite-cn"},
+					"server":   "local-dns",
+				},
+				{
+					"rule_set":      []string{"geosite-category-ads"},
+					"server":        "block-dns",
+					"disable_cache": true,
+				},
+				{
+					"outbound": "any",
 					"server":   "local-dns",
 				},
 			},
@@ -229,6 +250,12 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 					"tag":    "geosite-private",
 					"format": "binary",
 					"url":    "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-private.srs",
+				},
+				{
+					"type":   "remote",
+					"tag":    "geosite-category-ads",
+					"format": "binary",
+					"url":    "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ads.srs",
 				},
 			},
 			"rules":                   buildSingboxRouteRules(settings),
