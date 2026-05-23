@@ -1,6 +1,8 @@
 name: Sub Integration Test
 
 on:
+  push:
+    branches: [main]
   schedule:
     - cron: '0 */3 * * *'
   workflow_dispatch:
@@ -33,5 +35,5 @@ jobs:
           API_URL: ${{ secrets.PANEL_API_URL }}
           CI_TOKEN: ${{ secrets.CI_API_TOKEN }}
         run: |
-          ulimit -u 65536
+          ulimit -u 65536 2>/dev/null || true
           cd panel_backend && go run cmd/sub-test/main.go

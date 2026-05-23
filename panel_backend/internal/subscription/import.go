@@ -373,7 +373,7 @@ const (
 	testPort        = 80
 	testTimeout     = 15 * time.Second
 	xrayStartWait   = 800 * time.Millisecond
-	xrayStartLimit  = 10
+	xrayStartLimit  = 5
 	xraySocksLimit  = 20
 )
 
