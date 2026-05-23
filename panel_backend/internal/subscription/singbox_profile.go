@@ -464,11 +464,13 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 	}
 
 	autoGroup := map[string]interface{}{
-		"name":     "AUTO",
-		"type":     autoType,
-		"proxies":  autoGroupProxies,
-		"url":      "http://www.gstatic.com/generate_204",
-		"interval": user.ClashAutoInterval,
+		"name":             "AUTO",
+		"type":             autoType,
+		"proxies":          autoGroupProxies,
+		"url":              "http://www.gstatic.com/generate_204",
+		"interval":         user.ClashAutoInterval,
+		"timeout":          user.ClashAutoTimeout,
+		"max-failed-times": user.ClashAutoMaxFailed,
 	}
 	if autoType == "url-test" {
 		autoGroup["tolerance"] = user.ClashAutoTolerance

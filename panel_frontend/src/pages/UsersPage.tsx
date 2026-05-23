@@ -72,6 +72,8 @@ type UserFormState = {
   clashAutoTolerance: number;
   clashAutoType: string;
   clashLoadBalanceStrategy: string;
+  clashAutoTimeout: number;
+  clashAutoMaxFailed: number;
 };
 
 const defaultFormState: UserFormState = {
@@ -94,6 +96,8 @@ const defaultFormState: UserFormState = {
   clashAutoTolerance: 50,
   clashAutoType: "url-test",
   clashLoadBalanceStrategy: "round-robin",
+  clashAutoTimeout: 2000,
+  clashAutoMaxFailed: 1,
 };
 
 type AllocationFormState = {
@@ -558,7 +562,9 @@ export function UsersPage() {
           clashAutoType: form.clashAutoType,
           clashLoadBalanceStrategy: form.clashLoadBalanceStrategy,
           clashAutoInterval: form.clashAutoInterval,
-          clashAutoTolerance: form.clashAutoTolerance
+          clashAutoTolerance: form.clashAutoTolerance,
+          clashAutoTimeout: form.clashAutoTimeout,
+          clashAutoMaxFailed: form.clashAutoMaxFailed
         });
         setFormStatus("User updated.");
       } else {
@@ -657,6 +663,8 @@ export function UsersPage() {
       clashAutoTolerance: user.clashAutoTolerance ?? 50,
       clashAutoType: user.clashAutoType ?? "url-test",
       clashLoadBalanceStrategy: user.clashLoadBalanceStrategy ?? "round-robin",
+      clashAutoTimeout: user.clashAutoTimeout ?? 2000,
+      clashAutoMaxFailed: user.clashAutoMaxFailed ?? 1,
     });
     setAllocationForm(defaultAllocationForm);
     setFormError("");
@@ -1488,6 +1496,29 @@ export function UsersPage() {
                         </select>
                       </label>
                     )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-medium text-slate-400">Auto Timeout</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={form.clashAutoTimeout}
+                        onChange={(event) => setForm((current) => ({ ...current, clashAutoTimeout: Number(event.target.value) || 1 }))}
+                        className="input-shell w-full"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-medium text-slate-400">Auto Max Failed</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={form.clashAutoMaxFailed}
+                        onChange={(event) => setForm((current) => ({ ...current, clashAutoMaxFailed: Number(event.target.value) || 1 }))}
+                        className="input-shell w-full"
+                      />
+                    </label>
                   </div>
 
                   <label className="flex items-center gap-3 text-sm font-semibold text-violet-200">

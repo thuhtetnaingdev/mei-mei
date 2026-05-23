@@ -66,6 +66,8 @@ type UpdateUserInput struct {
 	ClashAutoTolerance   *int    `json:"clashAutoTolerance"`
 	ClashAutoType        *string `json:"clashAutoType"`
 	ClashLoadBalanceStrategy *string `json:"clashLoadBalanceStrategy"`
+	ClashAutoTimeout        *int    `json:"clashAutoTimeout"`
+	ClashAutoMaxFailed      *int    `json:"clashAutoMaxFailed"`
 	ClashFallbackMode    *string `json:"clashFallbackMode"`
 	ClashFallbackInterval *int   `json:"clashFallbackInterval"`
 	ClashFallbackCount   *int    `json:"clashFallbackCount"`
@@ -527,6 +529,12 @@ func (s *UserService) Update(id string, input UpdateUserInput) (*models.User, er
 		}
 		if input.ClashLoadBalanceStrategy != nil {
 			user.ClashLoadBalanceStrategy = *input.ClashLoadBalanceStrategy
+		}
+		if input.ClashAutoTimeout != nil {
+			user.ClashAutoTimeout = *input.ClashAutoTimeout
+		}
+		if input.ClashAutoMaxFailed != nil {
+			user.ClashAutoMaxFailed = *input.ClashAutoMaxFailed
 		}
 		if input.ClashFallbackMode != nil {
 			user.ClashFallbackMode = *input.ClashFallbackMode
@@ -1546,6 +1554,8 @@ func (s *UserService) describeUpdateRecord(input UpdateUserInput, user *models.U
 		fmt.Sprintf("ClashFB: %s", user.ClashFallbackMode),
 		fmt.Sprintf("AutoType: %s", user.ClashAutoType),
 		fmt.Sprintf("LBStrategy: %s", user.ClashLoadBalanceStrategy),
+		fmt.Sprintf("AutoTimeout: %d", user.ClashAutoTimeout),
+		fmt.Sprintf("AutoMaxFail: %d", user.ClashAutoMaxFailed),
 	}
 	if user.Notes != "" {
 		parts = append(parts, fmt.Sprintf("Notes: %s", user.Notes))
