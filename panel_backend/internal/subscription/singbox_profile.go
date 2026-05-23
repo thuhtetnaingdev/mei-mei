@@ -443,6 +443,13 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 	}
 
 	autoGroupProxies := proxyNames
+	if user.ClashFallback {
+		if user.ClashFallbackMode == "sub_integration" {
+			autoGroupProxies = nodeProxyNames
+		} else {
+			autoGroupProxies = importedProxyNames
+		}
+	}
 	if len(autoGroupProxies) == 0 {
 		autoGroupProxies = []string{"DIRECT"}
 	}
@@ -477,7 +484,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 					"type":      "url-test",
 					"proxies":   fbNames,
 					"url":       "http://www.gstatic.com/generate_204",
-					"interval":  300,
+					"interval":  user.ClashFallbackInterval,
 					"tolerance": user.ClashFallbackTolerance,
 				},
 				map[string]interface{}{

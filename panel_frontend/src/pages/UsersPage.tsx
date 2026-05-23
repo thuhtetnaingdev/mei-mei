@@ -1449,11 +1449,15 @@ export function UsersPage() {
                     <input
                       type="checkbox"
                       checked={form.clashFallback}
+                      disabled={!form.enabled || !form.subIntegration}
                       onChange={(event) => setForm((current) => ({ ...current, clashFallback: event.target.checked }))}
-                      className="h-4 w-4 rounded border-white/20 bg-transparent"
+                      className="h-4 w-4 rounded border-white/20 bg-transparent disabled:cursor-not-allowed disabled:opacity-40"
                     />
                     Clash Fallback
                   </label>
+                  {(!form.enabled || !form.subIntegration) && (
+                    <p className="text-xs text-slate-500">Requires both "Enabled for node sync" and "Sub Integration" to be on.</p>
+                  )}
 
                   <label className="block">
                     <span className="mb-1.5 block text-xs font-medium text-slate-400">Fallback Mode</span>
