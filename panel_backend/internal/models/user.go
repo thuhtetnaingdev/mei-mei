@@ -10,6 +10,7 @@ type User struct {
 	IsTesting            bool                      `json:"isTesting" gorm:"default:false"`
 	SubIntegration       bool                      `json:"subIntegration" gorm:"default:true"`
 	ClashFallback        bool                      `json:"clashFallback" gorm:"default:false"`
+	ClashAutoInterval    int                       `json:"clashAutoInterval" gorm:"default:600"`
 	ClashFallbackMode    string                    `json:"clashFallbackMode" gorm:"default:nodes"`
 	ClashFallbackInterval int                      `json:"clashFallbackInterval" gorm:"default:10"`
 	ClashFallbackCount   int                       `json:"clashFallbackCount" gorm:"default:10"`

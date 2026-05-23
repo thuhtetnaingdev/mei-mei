@@ -453,7 +453,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 			"type":      "url-test",
 			"proxies":   autoGroupProxies,
 			"url":       "http://www.gstatic.com/generate_204",
-			"interval":  600,
+			"interval":  user.ClashAutoInterval,
 			"tolerance": 50,
 		},
 	}

@@ -65,6 +65,7 @@ type UserFormState = {
   clashFallbackInterval: number;
   clashFallbackCount: number;
   clashFallback: boolean;
+  clashAutoInterval: number;
 };
 
 const defaultFormState: UserFormState = {
@@ -79,7 +80,8 @@ const defaultFormState: UserFormState = {
   clashFallbackMode: "nodes",
   clashFallbackInterval: 10,
   clashFallbackCount: 10,
-  clashFallback: false
+  clashFallback: false,
+  clashAutoInterval: 600
 };
 
 type AllocationFormState = {
@@ -537,7 +539,8 @@ export function UsersPage() {
           clashFallbackMode: form.clashFallbackMode,
           clashFallbackInterval: form.clashFallbackInterval,
           clashFallbackCount: form.clashFallbackCount,
-          clashFallback: form.clashFallback
+          clashFallback: form.clashFallback,
+          clashAutoInterval: form.clashAutoInterval
         });
         setFormStatus("User updated.");
       } else {
@@ -628,7 +631,8 @@ export function UsersPage() {
       clashFallbackMode: user.clashFallbackMode ?? "nodes",
       clashFallbackInterval: user.clashFallbackInterval ?? 10,
       clashFallbackCount: user.clashFallbackCount ?? 10,
-      clashFallback: user.clashFallback ?? false
+      clashFallback: user.clashFallback ?? false,
+      clashAutoInterval: user.clashAutoInterval ?? 600
     });
     setAllocationForm(defaultAllocationForm);
     setFormError("");
@@ -1410,6 +1414,19 @@ export function UsersPage() {
                 </label>
 
                 <div className="space-y-3 rounded-2xl border border-violet-300/10 bg-violet-300/[0.04] p-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-medium text-slate-400">Auto Interval</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={form.clashAutoInterval}
+                        onChange={(event) => setForm((current) => ({ ...current, clashAutoInterval: Number(event.target.value) || 1 }))}
+                        className="input-shell w-full"
+                      />
+                    </label>
+                  </div>
+
                   <label className="flex items-center gap-3 text-sm font-semibold text-violet-200">
                     <input
                       type="checkbox"

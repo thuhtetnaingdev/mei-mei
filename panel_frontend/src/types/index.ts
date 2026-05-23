@@ -8,6 +8,7 @@ export interface User {
   isTesting: boolean;
   subIntegration: boolean;
   clashFallback: boolean;
+  clashAutoInterval: number;
   clashFallbackMode: string;
   clashFallbackInterval: number;
   clashFallbackCount: number;

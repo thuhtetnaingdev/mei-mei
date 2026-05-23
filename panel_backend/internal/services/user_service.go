@@ -62,6 +62,7 @@ type UpdateUserInput struct {
 	SubIntegration       *bool   `json:"subIntegration"`
 	Notes                *string `json:"notes"`
 	ClashFallback        *bool   `json:"clashFallback"`
+	ClashAutoInterval    *int    `json:"clashAutoInterval"`
 	ClashFallbackMode    *string `json:"clashFallbackMode"`
 	ClashFallbackInterval *int   `json:"clashFallbackInterval"`
 	ClashFallbackCount   *int    `json:"clashFallbackCount"`
@@ -508,6 +509,9 @@ func (s *UserService) Update(id string, input UpdateUserInput) (*models.User, er
 		}
 		if input.ClashFallback != nil {
 			user.ClashFallback = *input.ClashFallback
+		}
+		if input.ClashAutoInterval != nil {
+			user.ClashAutoInterval = *input.ClashAutoInterval
 		}
 		if input.ClashFallbackMode != nil {
 			user.ClashFallbackMode = *input.ClashFallbackMode
