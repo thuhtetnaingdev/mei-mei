@@ -122,10 +122,9 @@ func (s *IntegrationService) GetPendingForTest(limit int) ([]models.Subscription
 func (s *IntegrationService) StartTest(id string, testRunID string) error {
 	now := time.Now()
 	result := s.db.Model(&models.SubscriptionIntegration{}).Where("id = ?", id).Updates(map[string]any{
-		"status":              models.IntegrationStatusTesting,
-		"test_run_id":         testRunID,
+		"status":               models.IntegrationStatusTesting,
+		"test_run_id":          testRunID,
 		"last_test_started_at": now,
-		"result":              "",
 	})
 	if result.Error != nil {
 		return result.Error
@@ -136,7 +135,7 @@ func (s *IntegrationService) StartTest(id string, testRunID string) error {
 	return nil
 }
 
-func (s *IntegrationService) AppendTestResult(id, testRunID string, tested, working []map[string]any, workingCount, totalCount int) error {
+func (s *IntegrationService) ReplaceBatch(id, testRunID string, working []map[string]any, workingOffset, workingCount, totalCount int) error {
 	var integ models.SubscriptionIntegration
 	if err := s.db.Where("id = ? AND test_run_id = ?", id, testRunID).First(&integ).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -150,15 +149,14 @@ func (s *IntegrationService) AppendTestResult(id, testRunID string, tested, work
 		json.Unmarshal([]byte(integ.Result), &result)
 	}
 
-	existingTested, _ := result["tested"].([]any)
-	for _, t := range tested {
-		existingTested = append(existingTested, t)
-	}
-	result["tested"] = existingTested
-
 	existingWorking, _ := result["working"].([]any)
-	for _, w := range working {
-		existingWorking = append(existingWorking, w)
+	end := workingOffset + len(working)
+	if end > len(existingWorking) {
+		extend := make([]any, end-len(existingWorking))
+		existingWorking = append(existingWorking, extend...)
+	}
+	for i, w := range working {
+		existingWorking[workingOffset+i] = w
 	}
 	result["working"] = existingWorking
 
@@ -173,19 +171,18 @@ func (s *IntegrationService) AppendTestResult(id, testRunID string, tested, work
 	}).Error
 }
 
-func (s *IntegrationService) CompleteTest(id, testRunID, resultJSON string, workingCount, totalCount int, status string, errorMsg string) error {
+func (s *IntegrationService) CompleteTest(id, testRunID string, workingCount, totalCount int, status string, errorMsg string) error {
 	now := time.Now()
 	intervalHours := 1
 	nextTestAt := now.Add(time.Duration(intervalHours) * time.Hour)
 
 	updates := map[string]any{
-		"result":                resultJSON,
-		"working_count":         workingCount,
-		"total_count":           totalCount,
-		"status":                status,
-		"error_message":         errorMsg,
+		"working_count":          workingCount,
+		"total_count":            totalCount,
+		"status":                 status,
+		"error_message":          errorMsg,
 		"last_test_completed_at": now,
-		"next_test_at":          nextTestAt,
+		"next_test_at":           nextTestAt,
 	}
 
 	result := s.db.Model(&models.SubscriptionIntegration{}).Where(

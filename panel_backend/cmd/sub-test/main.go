@@ -19,12 +19,20 @@ type IntegrationsResponse struct {
 	} `json:"integrations"`
 }
 
-type appendTestPayload struct {
-	TestRunID    string           `json:"testRunId"`
-	Tested       []map[string]any `json:"tested"`
-	Working      []map[string]any `json:"working"`
-	WorkingCount int              `json:"workingCount"`
-	TotalCount   int              `json:"totalCount"`
+type replaceBatchPayload struct {
+	TestRunID     string           `json:"testRunId"`
+	Working       []map[string]any `json:"working"`
+	WorkingOffset int              `json:"workingOffset"`
+	WorkingCount  int              `json:"workingCount"`
+	TotalCount    int              `json:"totalCount"`
+}
+
+type completeTestPayload struct {
+	TestRunID    string `json:"testRunId" binding:"required"`
+	WorkingCount int    `json:"workingCount"`
+	TotalCount   int    `json:"totalCount"`
+	Status       string `json:"status" binding:"required"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
 }
 
 func main() {
@@ -66,9 +74,7 @@ func main() {
 		uris, err := subscription.FetchSubscription(integ.SubscriptionURL)
 		if err != nil {
 			fmt.Printf("  fetch failed: %v\n", err)
-			emptyResult := &subscription.ImportResult{TotalURLs: 0}
-			rj, _ := json.Marshal(emptyResult)
-			if err2 := completeTest(client, apiURL, ciToken, integ.ID, testRunID, string(rj), 0, 0, "failed", err.Error()); err2 != nil {
+			if err2 := completeTest(client, apiURL, ciToken, integ.ID, testRunID, 0, 0, "failed", err.Error()); err2 != nil {
 				fmt.Fprintf(os.Stderr, "  complete test (error) failed: %v\n", err2)
 			}
 			continue
@@ -78,8 +84,8 @@ func main() {
 
 		batchSize := 200
 
-		var allTested []subscription.TestResult
 		var allWorking []subscription.SingboxOutbound
+		workingOffset := 0
 
 		for i := 0; i < len(parsed); i += batchSize {
 			end := i + batchSize
@@ -93,50 +99,37 @@ func main() {
 			tested := subscription.TestAllWithConcurrency(batch, batchSize)
 			working := subscription.ConvertWorking(batch, tested)
 
-			allTested = append(allTested, tested...)
 			allWorking = append(allWorking, working...)
 
-			testedAny := make([]map[string]any, len(tested))
-			for j, t := range tested {
-				testedAny[j] = testResultToAny(t)
-			}
 			workingAny := make([]map[string]any, len(working))
 			for j, w := range working {
 				workingAny[j] = singboxOutboundToAny(w)
 			}
 
-			if err := appendTest(client, apiURL, ciToken, integ.ID, testRunID,
-				testedAny, workingAny, len(allWorking), len(uris)); err != nil {
-				fmt.Fprintf(os.Stderr, "  append batch %d failed: %v\n", i/batchSize, err)
+			if err := replaceBatch(client, apiURL, ciToken, integ.ID, testRunID,
+				workingAny, workingOffset, len(allWorking), len(uris)); err != nil {
+				fmt.Fprintf(os.Stderr, "  replace batch %d failed: %v\n", i/batchSize, err)
 				newID := fmt.Sprintf("ci-%d-%d", integ.ID, time.Now().UnixMilli())
 				if err2 := startTest(client, apiURL, ciToken, integ.ID, newID); err2 == nil {
 					testRunID = newID
+					workingOffset = 0
 					fmt.Printf("  restarted test run %s\n", testRunID)
-					appendTest(client, apiURL, ciToken, integ.ID, testRunID,
-						testedAny, workingAny, len(allWorking), len(uris))
+					replaceBatch(client, apiURL, ciToken, integ.ID, testRunID,
+						workingAny, workingOffset, len(allWorking), len(uris))
 				}
 			}
-		}
 
-		result := &subscription.ImportResult{
-			Parsed:    parsed,
-			Tested:    allTested,
-			Working:   allWorking,
-			FailCount: len(allTested) - len(allWorking),
-			TotalURLs: len(uris),
+			workingOffset += len(working)
 		}
-		rj, _ := json.Marshal(result)
 
 		status := "completed"
-		if result.FailCount == result.TotalURLs {
-			status = "completed"
-		}
-		if err := completeTest(client, apiURL, ciToken, integ.ID, testRunID, string(rj), len(allWorking), result.TotalURLs, status, ""); err != nil {
+		if err := completeTest(client, apiURL, ciToken, integ.ID, testRunID,
+			len(allWorking), len(uris), status, ""); err != nil {
 			fmt.Fprintf(os.Stderr, "  complete test failed: %v\n", err)
 			continue
 		}
 
-		fmt.Printf("  done: %d/%d working, %d failed\n", len(allWorking), result.TotalURLs, result.FailCount)
+		fmt.Printf("  done: %d/%d working\n", len(allWorking), len(uris))
 	}
 }
 
@@ -191,49 +184,17 @@ func startTest(client *http.Client, apiURL, ciToken string, id uint, testRunID s
 	return nil
 }
 
-func completeTest(client *http.Client, apiURL, ciToken string, id uint, testRunID, resultJSON string, workingCount, totalCount int, status, errorMsg string) error {
-	payloadMap := map[string]interface{}{
-		"testRunId":    testRunID,
-		"result":       resultJSON,
-		"workingCount": workingCount,
-		"totalCount":   totalCount,
-		"status":       status,
-	}
-	if errorMsg != "" {
-		payloadMap["errorMessage"] = errorMsg
-	}
-	payload, _ := json.Marshal(payloadMap)
-
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s/api/integration/test/complete/%d", apiURL, id), bytes.NewBuffer(payload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-CI-Token", ciToken)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
-	}
-	return nil
-}
-
-func appendTest(client *http.Client, apiURL, ciToken string, id uint, testRunID string, tested, working []map[string]any, workingCount, totalCount int) error {
-	payload := appendTestPayload{
+func completeTest(client *http.Client, apiURL, ciToken string, id uint, testRunID string, workingCount, totalCount int, status, errorMsg string) error {
+	payload := completeTestPayload{
 		TestRunID:    testRunID,
-		Tested:       tested,
-		Working:      working,
 		WorkingCount: workingCount,
 		TotalCount:   totalCount,
+		Status:       status,
+		ErrorMessage: errorMsg,
 	}
 	body, _ := json.Marshal(payload)
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s/api/integration/test/append/%d", apiURL, id), bytes.NewBuffer(body))
+
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/api/integration/test/complete/%d", apiURL, id), bytes.NewBuffer(body))
 	if err != nil {
 		return err
 	}
@@ -253,17 +214,33 @@ func appendTest(client *http.Client, apiURL, ciToken string, id uint, testRunID 
 	return nil
 }
 
-func testResultToAny(tr subscription.TestResult) map[string]any {
-	return map[string]any{
-		"uri":       tr.URI,
-		"protocol":  tr.Protocol,
-		"host":      tr.Host,
-		"port":      tr.Port,
-		"working":   tr.Working,
-		"latencyMs": tr.LatencyMs,
-		"speedMbps": tr.SpeedMbps,
-		"error":     tr.Error,
+func replaceBatch(client *http.Client, apiURL, ciToken string, id uint, testRunID string, working []map[string]any, workingOffset, workingCount, totalCount int) error {
+	payload := replaceBatchPayload{
+		TestRunID:     testRunID,
+		Working:       working,
+		WorkingOffset: workingOffset,
+		WorkingCount:  workingCount,
+		TotalCount:    totalCount,
 	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/api/integration/test/replace-batch/%d", apiURL, id), bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CI-Token", ciToken)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("status %d: %s", resp.StatusCode, string(respBody))
+	}
+	return nil
 }
 
 func singboxOutboundToAny(so subscription.SingboxOutbound) map[string]any {

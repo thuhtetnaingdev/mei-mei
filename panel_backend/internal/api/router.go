@@ -193,7 +193,7 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 		ciAPI.GET("/test/all", handler.listAllIntegrationTests)
 		ciAPI.POST("/test/start/:id", handler.startIntegrationTest)
 		ciAPI.POST("/test/complete/:id", handler.completeIntegrationTest)
-		ciAPI.POST("/test/append/:id", handler.appendIntegrationTest)
+		ciAPI.POST("/test/replace-batch/:id", handler.replaceIntegrationBatch)
 	}
 
 	registerFrontendRoutes(router, cfg)
@@ -580,7 +580,6 @@ func (h *Handler) startIntegrationTest(c *gin.Context) {
 func (h *Handler) completeIntegrationTest(c *gin.Context) {
 	var body struct {
 		TestRunID    string `json:"testRunId" binding:"required"`
-		ResultJSON   string `json:"result" binding:"required"`
 		WorkingCount int    `json:"workingCount"`
 		TotalCount   int    `json:"totalCount"`
 		Status       string `json:"status" binding:"required"`
@@ -592,7 +591,7 @@ func (h *Handler) completeIntegrationTest(c *gin.Context) {
 	}
 
 	if err := h.integrationService.CompleteTest(
-		c.Param("id"), body.TestRunID, body.ResultJSON,
+		c.Param("id"), body.TestRunID,
 		body.WorkingCount, body.TotalCount, body.Status, body.ErrorMessage,
 	); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -602,21 +601,21 @@ func (h *Handler) completeIntegrationTest(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-func (h *Handler) appendIntegrationTest(c *gin.Context) {
+func (h *Handler) replaceIntegrationBatch(c *gin.Context) {
 	var body struct {
-		TestRunID    string           `json:"testRunId" binding:"required"`
-		Tested       []map[string]any `json:"tested"`
-		Working      []map[string]any `json:"working"`
-		WorkingCount int              `json:"workingCount"`
-		TotalCount   int              `json:"totalCount"`
+		TestRunID     string           `json:"testRunId" binding:"required"`
+		Working       []map[string]any `json:"working"`
+		WorkingOffset int              `json:"workingOffset"`
+		WorkingCount  int              `json:"workingCount"`
+		TotalCount    int              `json:"totalCount"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.integrationService.AppendTestResult(
-		c.Param("id"), body.TestRunID, body.Tested, body.Working,
-		body.WorkingCount, body.TotalCount,
+	if err := h.integrationService.ReplaceBatch(
+		c.Param("id"), body.TestRunID, body.Working,
+		body.WorkingOffset, body.WorkingCount, body.TotalCount,
 	); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
