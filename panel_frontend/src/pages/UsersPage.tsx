@@ -64,8 +64,10 @@ type UserFormState = {
   clashFallbackMode: string;
   clashFallbackInterval: number;
   clashFallbackCount: number;
+  clashFallbackTolerance: number;
   clashFallback: boolean;
   clashAutoInterval: number;
+  clashAutoTolerance: number;
 };
 
 const defaultFormState: UserFormState = {
@@ -80,8 +82,10 @@ const defaultFormState: UserFormState = {
   clashFallbackMode: "nodes",
   clashFallbackInterval: 10,
   clashFallbackCount: 10,
+  clashFallbackTolerance: 50,
   clashFallback: false,
-  clashAutoInterval: 600
+  clashAutoInterval: 600,
+  clashAutoTolerance: 50
 };
 
 type AllocationFormState = {
@@ -539,8 +543,10 @@ export function UsersPage() {
           clashFallbackMode: form.clashFallbackMode,
           clashFallbackInterval: form.clashFallbackInterval,
           clashFallbackCount: form.clashFallbackCount,
+          clashFallbackTolerance: form.clashFallbackTolerance,
           clashFallback: form.clashFallback,
-          clashAutoInterval: form.clashAutoInterval
+          clashAutoInterval: form.clashAutoInterval,
+          clashAutoTolerance: form.clashAutoTolerance
         });
         setFormStatus("User updated.");
       } else {
@@ -631,8 +637,10 @@ export function UsersPage() {
       clashFallbackMode: user.clashFallbackMode ?? "nodes",
       clashFallbackInterval: user.clashFallbackInterval ?? 10,
       clashFallbackCount: user.clashFallbackCount ?? 10,
+      clashFallbackTolerance: user.clashFallbackTolerance ?? 50,
       clashFallback: user.clashFallback ?? false,
-      clashAutoInterval: user.clashAutoInterval ?? 600
+      clashAutoInterval: user.clashAutoInterval ?? 600,
+      clashAutoTolerance: user.clashAutoTolerance ?? 50
     });
     setAllocationForm(defaultAllocationForm);
     setFormError("");
@@ -1425,6 +1433,16 @@ export function UsersPage() {
                         className="input-shell w-full"
                       />
                     </label>
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-medium text-slate-400">Auto Tolerance</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={form.clashAutoTolerance}
+                        onChange={(event) => setForm((current) => ({ ...current, clashAutoTolerance: Number(event.target.value) || 0 }))}
+                        className="input-shell w-full"
+                      />
+                    </label>
                   </div>
 
                   <label className="flex items-center gap-3 text-sm font-semibold text-violet-200">
@@ -1450,7 +1468,7 @@ export function UsersPage() {
                     </select>
                   </label>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-3 gap-3">
                     <label className="block">
                       <span className="mb-1.5 block text-xs font-medium text-slate-400">Count</span>
                       <input
@@ -1464,13 +1482,25 @@ export function UsersPage() {
                     </label>
 
                     <label className="block">
-                      <span className="mb-1.5 block text-xs font-medium text-slate-400">Interval</span>
+                      <span className="mb-1.5 block text-xs font-medium text-slate-400">FB Interval</span>
                       <input
                         type="number"
                         min={1}
                         disabled={!form.clashFallback}
                         value={form.clashFallbackInterval}
                         onChange={(event) => setForm((current) => ({ ...current, clashFallbackInterval: Number(event.target.value) || 1 }))}
+                        className="input-shell w-full disabled:cursor-not-allowed disabled:opacity-40"
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-medium text-slate-400">FB Tolerance</span>
+                      <input
+                        type="number"
+                        min={0}
+                        disabled={!form.clashFallback}
+                        value={form.clashFallbackTolerance}
+                        onChange={(event) => setForm((current) => ({ ...current, clashFallbackTolerance: Number(event.target.value) || 0 }))}
                         className="input-shell w-full disabled:cursor-not-allowed disabled:opacity-40"
                       />
                     </label>

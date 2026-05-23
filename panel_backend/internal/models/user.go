@@ -11,9 +11,11 @@ type User struct {
 	SubIntegration       bool                      `json:"subIntegration" gorm:"default:true"`
 	ClashFallback        bool                      `json:"clashFallback" gorm:"default:false"`
 	ClashAutoInterval    int                       `json:"clashAutoInterval" gorm:"default:600"`
+	ClashAutoTolerance   int                       `json:"clashAutoTolerance" gorm:"default:50"`
 	ClashFallbackMode    string                    `json:"clashFallbackMode" gorm:"default:nodes"`
 	ClashFallbackInterval int                      `json:"clashFallbackInterval" gorm:"default:10"`
 	ClashFallbackCount   int                       `json:"clashFallbackCount" gorm:"default:10"`
+	ClashFallbackTolerance int                     `json:"clashFallbackTolerance" gorm:"default:50"`
 	ExpiresAt            *time.Time                `json:"expiresAt"`
 	BandwidthLimitGB     int64                     `json:"bandwidthLimitGb"`
 	BandwidthUsedBytes   int64                     `json:"bandwidthUsedBytes"`

@@ -63,9 +63,11 @@ type UpdateUserInput struct {
 	Notes                *string `json:"notes"`
 	ClashFallback        *bool   `json:"clashFallback"`
 	ClashAutoInterval    *int    `json:"clashAutoInterval"`
+	ClashAutoTolerance   *int    `json:"clashAutoTolerance"`
 	ClashFallbackMode    *string `json:"clashFallbackMode"`
 	ClashFallbackInterval *int   `json:"clashFallbackInterval"`
 	ClashFallbackCount   *int    `json:"clashFallbackCount"`
+	ClashFallbackTolerance *int  `json:"clashFallbackTolerance"`
 }
 
 // UserListOptions represents filtering and pagination options for user list queries
@@ -513,6 +515,9 @@ func (s *UserService) Update(id string, input UpdateUserInput) (*models.User, er
 		if input.ClashAutoInterval != nil {
 			user.ClashAutoInterval = *input.ClashAutoInterval
 		}
+		if input.ClashAutoTolerance != nil {
+			user.ClashAutoTolerance = *input.ClashAutoTolerance
+		}
 		if input.ClashFallbackMode != nil {
 			user.ClashFallbackMode = *input.ClashFallbackMode
 		}
@@ -521,6 +526,9 @@ func (s *UserService) Update(id string, input UpdateUserInput) (*models.User, er
 		}
 		if input.ClashFallbackCount != nil {
 			user.ClashFallbackCount = *input.ClashFallbackCount
+		}
+		if input.ClashFallbackTolerance != nil {
+			user.ClashFallbackTolerance = *input.ClashFallbackTolerance
 		}
 
 		if err := tx.Save(&user).Error; err != nil {

@@ -454,7 +454,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 			"proxies":   autoGroupProxies,
 			"url":       "http://www.gstatic.com/generate_204",
 			"interval":  user.ClashAutoInterval,
-			"tolerance": 50,
+			"tolerance": user.ClashAutoTolerance,
 		},
 	}
 
@@ -478,7 +478,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 					"proxies":   fbNames,
 					"url":       "http://www.gstatic.com/generate_204",
 					"interval":  300,
-					"tolerance": 50,
+					"tolerance": user.ClashFallbackTolerance,
 				},
 				map[string]interface{}{
 					"name":      "FALLBACK",

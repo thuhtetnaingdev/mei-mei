@@ -9,9 +9,11 @@ export interface User {
   subIntegration: boolean;
   clashFallback: boolean;
   clashAutoInterval: number;
+  clashAutoTolerance: number;
   clashFallbackMode: string;
   clashFallbackInterval: number;
   clashFallbackCount: number;
+  clashFallbackTolerance: number;
   expiresAt?: string | null;
   bandwidthLimitGb: number;
   bandwidthUsedBytes: number;
