@@ -7,6 +7,10 @@ export interface User {
   enabled: boolean;
   isTesting: boolean;
   subIntegration: boolean;
+  clashFallback: boolean;
+  clashFallbackMode: string;
+  clashFallbackInterval: number;
+  clashFallbackCount: number;
   expiresAt?: string | null;
   bandwidthLimitGb: number;
   bandwidthUsedBytes: number;

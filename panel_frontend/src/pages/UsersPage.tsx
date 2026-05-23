@@ -61,6 +61,10 @@ type UserFormState = {
   initialBandwidthGb: number;
   initialTokenAmount: number;
   initialExpiresAt: string;
+  clashFallbackMode: string;
+  clashFallbackInterval: number;
+  clashFallbackCount: number;
+  clashFallback: boolean;
 };
 
 const defaultFormState: UserFormState = {
@@ -71,7 +75,11 @@ const defaultFormState: UserFormState = {
   notes: "",
   initialBandwidthGb: 100,
   initialTokenAmount: 100,
-  initialExpiresAt: ""
+  initialExpiresAt: "",
+  clashFallbackMode: "nodes",
+  clashFallbackInterval: 10,
+  clashFallbackCount: 10,
+  clashFallback: false
 };
 
 type AllocationFormState = {
@@ -525,7 +533,11 @@ export function UsersPage() {
           enabled: form.enabled,
           isTesting: form.isTesting,
           subIntegration: form.subIntegration,
-          notes: form.notes
+          notes: form.notes,
+          clashFallbackMode: form.clashFallbackMode,
+          clashFallbackInterval: form.clashFallbackInterval,
+          clashFallbackCount: form.clashFallbackCount,
+          clashFallback: form.clashFallback
         });
         setFormStatus("User updated.");
       } else {
@@ -612,7 +624,11 @@ export function UsersPage() {
       notes: user.notes ?? "",
       initialBandwidthGb: 0,
       initialTokenAmount: 0,
-      initialExpiresAt: ""
+      initialExpiresAt: "",
+      clashFallbackMode: user.clashFallbackMode ?? "nodes",
+      clashFallbackInterval: user.clashFallbackInterval ?? 10,
+      clashFallbackCount: user.clashFallbackCount ?? 10,
+      clashFallback: user.clashFallback ?? false
     });
     setAllocationForm(defaultAllocationForm);
     setFormError("");
@@ -1392,6 +1408,57 @@ export function UsersPage() {
                   />
                   Sub Integration
                 </label>
+
+                <div className="space-y-3 rounded-2xl border border-violet-300/10 bg-violet-300/[0.04] p-4">
+                  <label className="flex items-center gap-3 text-sm font-semibold text-violet-200">
+                    <input
+                      type="checkbox"
+                      checked={form.clashFallback}
+                      onChange={(event) => setForm((current) => ({ ...current, clashFallback: event.target.checked }))}
+                      className="h-4 w-4 rounded border-white/20 bg-transparent"
+                    />
+                    Clash Fallback
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-medium text-slate-400">Fallback Mode</span>
+                    <select
+                      value={form.clashFallbackMode}
+                      disabled={!form.clashFallback}
+                      onChange={(event) => setForm((current) => ({ ...current, clashFallbackMode: event.target.value }))}
+                      className="input-shell w-full disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <option value="nodes">Nodes</option>
+                      <option value="sub_integration">Sub Integration</option>
+                    </select>
+                  </label>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-medium text-slate-400">Count</span>
+                      <input
+                        type="number"
+                        min={1}
+                        disabled={!form.clashFallback}
+                        value={form.clashFallbackCount}
+                        onChange={(event) => setForm((current) => ({ ...current, clashFallbackCount: Number(event.target.value) || 1 }))}
+                        className="input-shell w-full disabled:cursor-not-allowed disabled:opacity-40"
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-medium text-slate-400">Interval</span>
+                      <input
+                        type="number"
+                        min={1}
+                        disabled={!form.clashFallback}
+                        value={form.clashFallbackInterval}
+                        onChange={(event) => setForm((current) => ({ ...current, clashFallbackInterval: Number(event.target.value) || 1 }))}
+                        className="input-shell w-full disabled:cursor-not-allowed disabled:opacity-40"
+                      />
+                    </label>
+                  </div>
+                </div>
 
                 {form.isTesting ? (
                   <div className="rounded-2xl border border-amber-300/20 bg-amber-300/[0.06] px-4 py-3 text-sm text-amber-100">

@@ -331,6 +331,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 	availableNodes := filterAvailableNodes(user, nodes)
 	proxies := make([]map[string]interface{}, 0)
 	proxyNames := make([]string, 0)
+	nodeProxyNames := make([]string, 0)
 
 	for _, node := range availableNodes {
 		plan := buildNodeTransportPlan(node, settings)
@@ -338,6 +339,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		for _, variant := range plan.Reality {
 			name := variant.Tag
 			proxyNames = append(proxyNames, name)
+			nodeProxyNames = append(nodeProxyNames, name)
 			proxies = append(proxies, map[string]interface{}{
 				"name":               name,
 				"type":               "vless",
@@ -380,6 +382,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 				tuicProxy["sni"] = node.PublicHost
 			}
 			proxyNames = append(proxyNames, name)
+			nodeProxyNames = append(nodeProxyNames, name)
 			proxies = append(proxies, tuicProxy)
 		}
 
@@ -387,6 +390,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		if shadowsocks.Port > 0 {
 			name := shadowsocks.Tag
 			proxyNames = append(proxyNames, name)
+			nodeProxyNames = append(nodeProxyNames, name)
 			proxies = append(proxies, map[string]interface{}{
 				"name":     name,
 				"type":     "ss",
@@ -401,6 +405,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		for _, variant := range plan.Hysteria2 {
 			name := variant.Tag
 			proxyNames = append(proxyNames, name)
+			nodeProxyNames = append(nodeProxyNames, name)
 			proxy := map[string]interface{}{
 				"name":             name,
 				"type":             "hysteria2",
@@ -442,11 +447,6 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		autoGroupProxies = []string{"DIRECT"}
 	}
 
-	fbLimit := 20
-	if len(importedProxyNames) > fbLimit {
-		importedProxyNames = importedProxyNames[:fbLimit]
-	}
-
 	proxyGroups := []map[string]interface{}{
 		{
 			"name":      "AUTO",
@@ -458,28 +458,45 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		},
 	}
 
-	if len(importedProxyNames) > 0 {
-		proxyGroups = append(proxyGroups,
-			map[string]interface{}{
-				"name":      "Fallback-Nodes",
-				"type":      "url-test",
-				"proxies":   importedProxyNames,
-				"url":       "http://www.gstatic.com/generate_204",
-				"interval":  300,
-				"tolerance": 50,
-			},
-			map[string]interface{}{
-				"name":      "FALLBACK",
-				"type":      "fallback",
-				"proxies":   []string{"AUTO", "Fallback-Nodes"},
-				"url":       "http://www.gstatic.com/generate_204",
-				"interval":  10,
-				"timeout":   3000,
-			},
-		)
+	if user.ClashFallback {
+		var fbNames []string
+		if user.ClashFallbackMode == "sub_integration" {
+			fbNames = importedProxyNames
+		} else {
+			fbNames = nodeProxyNames
+		}
+		fbLimit := user.ClashFallbackCount
+		if fbLimit > 0 && len(fbNames) > fbLimit {
+			fbNames = fbNames[:fbLimit]
+		}
+
+		if len(fbNames) > 0 {
+			proxyGroups = append(proxyGroups,
+				map[string]interface{}{
+					"name":      "Fallback-Nodes",
+					"type":      "url-test",
+					"proxies":   fbNames,
+					"url":       "http://www.gstatic.com/generate_204",
+					"interval":  300,
+					"tolerance": 50,
+				},
+				map[string]interface{}{
+					"name":      "FALLBACK",
+					"type":      "fallback",
+					"proxies":   []string{"AUTO", "Fallback-Nodes"},
+					"url":       "http://www.gstatic.com/generate_204",
+					"interval":  user.ClashFallbackInterval,
+					"timeout":   3000,
+				},
+			)
+		}
 	}
 
-	selectProxies := []string{"AUTO", "FALLBACK", "DIRECT"}
+	selectProxies := []string{"AUTO"}
+	if user.ClashFallback {
+		selectProxies = append(selectProxies, "FALLBACK")
+	}
+	selectProxies = append(selectProxies, "DIRECT")
 	selectProxies = append(selectProxies, proxyNames...)
 
 	proxyGroups = append(proxyGroups, map[string]interface{}{

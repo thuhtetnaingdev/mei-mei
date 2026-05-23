@@ -56,11 +56,15 @@ type CreateUserInput struct {
 }
 
 type UpdateUserInput struct {
-	Email          *string `json:"email"`
-	Enabled        *bool   `json:"enabled"`
-	IsTesting      *bool   `json:"isTesting"`
-	SubIntegration *bool   `json:"subIntegration"`
-	Notes          *string `json:"notes"`
+	Email                *string `json:"email"`
+	Enabled              *bool   `json:"enabled"`
+	IsTesting            *bool   `json:"isTesting"`
+	SubIntegration       *bool   `json:"subIntegration"`
+	Notes                *string `json:"notes"`
+	ClashFallback        *bool   `json:"clashFallback"`
+	ClashFallbackMode    *string `json:"clashFallbackMode"`
+	ClashFallbackInterval *int   `json:"clashFallbackInterval"`
+	ClashFallbackCount   *int    `json:"clashFallbackCount"`
 }
 
 // UserListOptions represents filtering and pagination options for user list queries
@@ -501,6 +505,18 @@ func (s *UserService) Update(id string, input UpdateUserInput) (*models.User, er
 		}
 		if input.Notes != nil {
 			user.Notes = *input.Notes
+		}
+		if input.ClashFallback != nil {
+			user.ClashFallback = *input.ClashFallback
+		}
+		if input.ClashFallbackMode != nil {
+			user.ClashFallbackMode = *input.ClashFallbackMode
+		}
+		if input.ClashFallbackInterval != nil {
+			user.ClashFallbackInterval = *input.ClashFallbackInterval
+		}
+		if input.ClashFallbackCount != nil {
+			user.ClashFallbackCount = *input.ClashFallbackCount
 		}
 
 		if err := tx.Save(&user).Error; err != nil {
@@ -1499,6 +1515,7 @@ func (s *UserService) describeUpdateRecord(input UpdateUserInput, user *models.U
 		fmt.Sprintf("Email: %s", user.Email),
 		fmt.Sprintf("Enabled: %t", user.Enabled),
 		fmt.Sprintf("Testing: %t", user.IsTesting),
+		fmt.Sprintf("ClashFB: %s", user.ClashFallbackMode),
 	}
 	if user.Notes != "" {
 		parts = append(parts, fmt.Sprintf("Notes: %s", user.Notes))
