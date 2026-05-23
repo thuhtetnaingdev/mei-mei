@@ -488,12 +488,13 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 					"tolerance": user.ClashFallbackTolerance,
 				},
 				map[string]interface{}{
-					"name":      "FALLBACK",
-					"type":      "fallback",
-					"proxies":   []string{"AUTO", "Fallback-Nodes"},
-					"url":       "http://www.gstatic.com/generate_204",
-					"interval":  user.ClashFallbackInterval,
-					"timeout":   3000,
+					"name":             "FALLBACK",
+					"type":             "fallback",
+					"proxies":          []string{"AUTO", "Fallback-Nodes"},
+					"url":              "http://www.gstatic.com/generate_204",
+					"interval":         user.ClashFallbackInterval,
+					"timeout":          user.ClashFallbackTimeout,
+					"max-failed-times": user.ClashFallbackMaxFailed,
 				},
 			)
 		}

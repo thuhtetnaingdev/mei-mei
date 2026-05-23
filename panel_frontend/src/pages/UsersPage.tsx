@@ -65,6 +65,8 @@ type UserFormState = {
   clashFallbackInterval: number;
   clashFallbackCount: number;
   clashFallbackTolerance: number;
+  clashFallbackTimeout: number;
+  clashFallbackMaxFailed: number;
   clashFallback: boolean;
   clashAutoInterval: number;
   clashAutoTolerance: number;
@@ -83,6 +85,8 @@ const defaultFormState: UserFormState = {
   clashFallbackInterval: 10,
   clashFallbackCount: 10,
   clashFallbackTolerance: 50,
+  clashFallbackTimeout: 2000,
+  clashFallbackMaxFailed: 1,
   clashFallback: false,
   clashAutoInterval: 600,
   clashAutoTolerance: 50
@@ -358,8 +362,31 @@ function NodeUsageRing({ percentage, emphasis }: NodeUsageRingProps) {
       </svg>
       <div className="absolute inset-0 flex items-center justify-center">
         <span className={`text-xs font-semibold ${textClass}`}>{Math.round(clampedPercentage)}%</span>
-      </div>
-    </div>
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-medium text-slate-400">Timeout</span>
+                      <input
+                        type="number"
+                        min={1}
+                        disabled={!form.clashFallback}
+                        value={form.clashFallbackTimeout}
+                        onChange={(event) => setForm((current) => ({ ...current, clashFallbackTimeout: Number(event.target.value) || 1 }))}
+                        className="input-shell w-full disabled:cursor-not-allowed disabled:opacity-40"
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-medium text-slate-400">Max Failed</span>
+                      <input
+                        type="number"
+                        min={1}
+                        disabled={!form.clashFallback}
+                        value={form.clashFallbackMaxFailed}
+                        onChange={(event) => setForm((current) => ({ ...current, clashFallbackMaxFailed: Number(event.target.value) || 1 }))}
+                        className="input-shell w-full disabled:cursor-not-allowed disabled:opacity-40"
+                      />
+                    </label>
+                  </div>
+                </div>
   );
 }
 
@@ -544,6 +571,8 @@ export function UsersPage() {
           clashFallbackInterval: form.clashFallbackInterval,
           clashFallbackCount: form.clashFallbackCount,
           clashFallbackTolerance: form.clashFallbackTolerance,
+          clashFallbackTimeout: form.clashFallbackTimeout,
+          clashFallbackMaxFailed: form.clashFallbackMaxFailed,
           clashFallback: form.clashFallback,
           clashAutoInterval: form.clashAutoInterval,
           clashAutoTolerance: form.clashAutoTolerance
@@ -638,6 +667,8 @@ export function UsersPage() {
       clashFallbackInterval: user.clashFallbackInterval ?? 10,
       clashFallbackCount: user.clashFallbackCount ?? 10,
       clashFallbackTolerance: user.clashFallbackTolerance ?? 50,
+      clashFallbackTimeout: user.clashFallbackTimeout ?? 2000,
+      clashFallbackMaxFailed: user.clashFallbackMaxFailed ?? 1,
       clashFallback: user.clashFallback ?? false,
       clashAutoInterval: user.clashAutoInterval ?? 600,
       clashAutoTolerance: user.clashAutoTolerance ?? 50
@@ -1505,6 +1536,32 @@ export function UsersPage() {
                         disabled={!form.clashFallback}
                         value={form.clashFallbackTolerance}
                         onChange={(event) => setForm((current) => ({ ...current, clashFallbackTolerance: Number(event.target.value) || 0 }))}
+                        className="input-shell w-full disabled:cursor-not-allowed disabled:opacity-40"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-medium text-slate-400">Timeout</span>
+                      <input
+                        type="number"
+                        min={1}
+                        disabled={!form.clashFallback}
+                        value={form.clashFallbackTimeout}
+                        onChange={(event) => setForm((current) => ({ ...current, clashFallbackTimeout: Number(event.target.value) || 1 }))}
+                        className="input-shell w-full disabled:cursor-not-allowed disabled:opacity-40"
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-medium text-slate-400">Max Failed</span>
+                      <input
+                        type="number"
+                        min={1}
+                        disabled={!form.clashFallback}
+                        value={form.clashFallbackMaxFailed}
+                        onChange={(event) => setForm((current) => ({ ...current, clashFallbackMaxFailed: Number(event.target.value) || 1 }))}
                         className="input-shell w-full disabled:cursor-not-allowed disabled:opacity-40"
                       />
                     </label>

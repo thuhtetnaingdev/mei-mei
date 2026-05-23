@@ -16,6 +16,8 @@ type User struct {
 	ClashFallbackInterval int                      `json:"clashFallbackInterval" gorm:"default:10"`
 	ClashFallbackCount   int                       `json:"clashFallbackCount" gorm:"default:10"`
 	ClashFallbackTolerance int                     `json:"clashFallbackTolerance" gorm:"default:50"`
+	ClashFallbackTimeout   int                     `json:"clashFallbackTimeout" gorm:"default:2000"`
+	ClashFallbackMaxFailed int                     `json:"clashFallbackMaxFailed" gorm:"default:1"`
 	ExpiresAt            *time.Time                `json:"expiresAt"`
 	BandwidthLimitGB     int64                     `json:"bandwidthLimitGb"`
 	BandwidthUsedBytes   int64                     `json:"bandwidthUsedBytes"`

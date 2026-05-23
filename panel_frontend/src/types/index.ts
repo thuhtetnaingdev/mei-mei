@@ -14,6 +14,8 @@ export interface User {
   clashFallbackInterval: number;
   clashFallbackCount: number;
   clashFallbackTolerance: number;
+  clashFallbackTimeout: number;
+  clashFallbackMaxFailed: number;
   expiresAt?: string | null;
   bandwidthLimitGb: number;
   bandwidthUsedBytes: number;
