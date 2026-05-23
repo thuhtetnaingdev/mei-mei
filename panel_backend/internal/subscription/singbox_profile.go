@@ -442,7 +442,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		autoGroupProxies = []string{"DIRECT"}
 	}
 
-	fbLimit := 10
+	fbLimit := 20
 	if len(importedProxyNames) > fbLimit {
 		importedProxyNames = importedProxyNames[:fbLimit]
 	}
