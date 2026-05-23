@@ -419,6 +419,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		}
 	}
 
+	var importedProxyNames []string
 	for _, ob := range extraOutbounds {
 		name, _ := ob["tag"].(string)
 		if name == "" {
@@ -430,16 +431,59 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		}
 		proxy := singboxToClashProxy(ob, name)
 		if proxy != nil {
-			proxyNames = append(proxyNames, name)
+			importedProxyNames = append(importedProxyNames, name)
 			proxies = append(proxies, proxy)
 		}
 	}
 
-	groupProxies := append([]string{"AUTO", "DIRECT"}, proxyNames...)
 	autoGroupProxies := proxyNames
 	if len(autoGroupProxies) == 0 {
 		autoGroupProxies = []string{"DIRECT"}
 	}
+
+	proxyGroups := []map[string]interface{}{
+		{
+			"name":      "AUTO",
+			"type":      "url-test",
+			"proxies":   autoGroupProxies,
+			"url":       "http://www.gstatic.com/generate_204",
+			"interval":  600,
+			"tolerance": 50,
+		},
+	}
+
+	if len(importedProxyNames) > 0 {
+		proxyGroups = append(proxyGroups,
+			map[string]interface{}{
+				"name":      "Fallback-Nodes",
+				"type":      "url-test",
+				"proxies":   importedProxyNames,
+				"url":       "http://www.gstatic.com/generate_204",
+				"interval":  300,
+				"tolerance": 50,
+			},
+			map[string]interface{}{
+				"name":      "FALLBACK",
+				"type":      "fallback",
+				"proxies":   []string{"AUTO", "Fallback-Nodes"},
+				"url":       "http://www.gstatic.com/generate_204",
+				"interval":  60,
+			},
+		)
+	}
+
+	selectProxies := []string{"AUTO", "DIRECT"}
+	if len(importedProxyNames) > 0 {
+		selectProxies = append([]string{"AUTO", "FALLBACK", "DIRECT"}, proxyNames...)
+	} else {
+		selectProxies = append(selectProxies, proxyNames...)
+	}
+
+	proxyGroups = append(proxyGroups, map[string]interface{}{
+		"name":    "Proxy",
+		"type":    "select",
+		"proxies": selectProxies,
+	})
 
 	return map[string]interface{}{
 		"mixed-port":                7890,
@@ -564,21 +608,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 			},
 		},
 		"proxies": proxies,
-		"proxy-groups": []map[string]interface{}{
-			{
-				"name":      "AUTO",
-				"type":      "url-test",
-				"proxies":   autoGroupProxies,
-				"url":       "http://www.gstatic.com/generate_204",
-				"interval":  600,
-				"tolerance": 50,
-			},
-			{
-				"name":    "Proxy",
-				"type":    "select",
-				"proxies": groupProxies,
-			},
-		},
+		"proxy-groups": proxyGroups,
 		"rules": []string{
 			"DOMAIN,dns.google,REJECT",
 			"DOMAIN,dns.quad9.net,REJECT",

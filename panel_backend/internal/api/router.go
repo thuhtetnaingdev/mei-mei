@@ -14,6 +14,7 @@ import (
 	"panel_backend/internal/services"
 	"panel_backend/internal/subscription"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -552,6 +553,61 @@ func (h *Handler) collectIntegrationWorkingProxies() []map[string]interface{} {
 			cfg["tag"] = fmt.Sprintf("%04d", len(result)+1)
 			result = append(result, cfg)
 		}
+	}
+	return result
+}
+
+func (h *Handler) collectBestIntegrationProxies(limit int) []map[string]interface{} {
+	integrations, err := h.integrationService.List()
+	if err != nil {
+		return nil
+	}
+
+	type scoredOutbound struct {
+		cfg       map[string]interface{}
+		speedMbps float64
+		latencyMs int64
+	}
+
+	var all []scoredOutbound
+	for _, integ := range integrations {
+		if integ.Status == models.IntegrationStatusPending || integ.Result == "" {
+			continue
+		}
+		var parsed struct {
+			Working []subscription.SingboxOutbound `json:"working"`
+		}
+		if err := json.Unmarshal([]byte(integ.Result), &parsed); err != nil {
+			continue
+		}
+		for _, w := range parsed.Working {
+			if w.Config == nil {
+				continue
+			}
+			all = append(all, scoredOutbound{
+				cfg:       w.Config,
+				speedMbps: w.SpeedMbps,
+				latencyMs: w.LatencyMs,
+			})
+		}
+	}
+
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].speedMbps != all[j].speedMbps {
+			return all[i].speedMbps > all[j].speedMbps
+		}
+		return all[i].latencyMs < all[j].latencyMs
+	})
+
+	if limit > 0 && len(all) > limit {
+		all = all[:limit]
+	}
+
+	result := make([]map[string]interface{}, len(all))
+	for i, s := range all {
+		cfg := s.cfg
+		cfg["tag"] = fmt.Sprintf("%04d", i+1)
+		result[i] = cfg
 	}
 	return result
 }
@@ -1216,13 +1272,12 @@ func (h *Handler) getSingboxProfile(c *gin.Context) {
 		return
 	}
 
-	var extraOutbounds []map[string]interface{}
-	if user.SubIntegration {
-		extraOutbounds = h.collectIntegrationWorkingProxies()
-	}
-
 	if strings.EqualFold(c.Query("format"), "clash") {
-		profile, err := subscription.GenerateClashProfile(*user, nodes, protocolSettings, extraOutbounds)
+		var clashOutbounds []map[string]interface{}
+		if user.SubIntegration {
+			clashOutbounds = h.collectBestIntegrationProxies(10)
+		}
+		profile, err := subscription.GenerateClashProfile(*user, nodes, protocolSettings, clashOutbounds)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -1230,6 +1285,11 @@ func (h *Handler) getSingboxProfile(c *gin.Context) {
 
 		c.Data(http.StatusOK, "text/plain; charset=utf-8", profile)
 		return
+	}
+
+	var extraOutbounds []map[string]interface{}
+	if user.SubIntegration {
+		extraOutbounds = h.collectIntegrationWorkingProxies()
 	}
 
 	header := "upload=0; download=" + strconv.FormatInt(user.BandwidthUsedBytes, 10)
