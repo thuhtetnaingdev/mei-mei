@@ -499,11 +499,11 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		}
 	}
 
-	selectProxies := []string{"AUTO"}
+	selectProxies := []string{}
 	if user.ClashFallback {
 		selectProxies = append(selectProxies, "FALLBACK")
 	}
-	selectProxies = append(selectProxies, "DIRECT")
+	selectProxies = append(selectProxies, "AUTO", "DIRECT")
 	selectProxies = append(selectProxies, proxyNames...)
 
 	proxyGroups = append(proxyGroups, map[string]interface{}{
