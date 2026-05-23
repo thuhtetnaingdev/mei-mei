@@ -50,7 +50,7 @@ func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings s
 			"tag":       "auto",
 			"outbounds": urltestOutbounds,
 			"url":       "http://www.gstatic.com/generate_204",
-			"interval":  "10m",
+			"interval":  "3m",
 			"tolerance": 50,
 		},
 		{
