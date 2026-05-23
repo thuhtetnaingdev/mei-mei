@@ -454,16 +454,30 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		autoGroupProxies = []string{"DIRECT"}
 	}
 
-	proxyGroups := []map[string]interface{}{
-		{
-			"name":      "AUTO",
-			"type":      "url-test",
-			"proxies":   autoGroupProxies,
-			"url":       "http://www.gstatic.com/generate_204",
-			"interval":  user.ClashAutoInterval,
-			"tolerance": user.ClashAutoTolerance,
-		},
+	autoType := user.ClashAutoType
+	if autoType == "" {
+		autoType = "url-test"
 	}
+	lbStrategy := user.ClashLoadBalanceStrategy
+	if lbStrategy == "" {
+		lbStrategy = "round-robin"
+	}
+
+	autoGroup := map[string]interface{}{
+		"name":     "AUTO",
+		"type":     autoType,
+		"proxies":  autoGroupProxies,
+		"url":      "http://www.gstatic.com/generate_204",
+		"interval": user.ClashAutoInterval,
+	}
+	if autoType == "url-test" {
+		autoGroup["tolerance"] = user.ClashAutoTolerance
+	}
+	if autoType == "load-balance" {
+		autoGroup["strategy"] = lbStrategy
+	}
+
+	proxyGroups := []map[string]interface{}{autoGroup}
 
 	if user.ClashFallback {
 		var fbNames []string

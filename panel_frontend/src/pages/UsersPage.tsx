@@ -70,6 +70,8 @@ type UserFormState = {
   clashFallback: boolean;
   clashAutoInterval: number;
   clashAutoTolerance: number;
+  clashAutoType: string;
+  clashLoadBalanceStrategy: string;
 };
 
 const defaultFormState: UserFormState = {
@@ -89,7 +91,9 @@ const defaultFormState: UserFormState = {
   clashFallbackMaxFailed: 1,
   clashFallback: false,
   clashAutoInterval: 600,
-  clashAutoTolerance: 50
+  clashAutoTolerance: 50,
+  clashAutoType: "url-test",
+  clashLoadBalanceStrategy: "round-robin",
 };
 
 type AllocationFormState = {
@@ -551,6 +555,8 @@ export function UsersPage() {
           clashFallbackTimeout: form.clashFallbackTimeout,
           clashFallbackMaxFailed: form.clashFallbackMaxFailed,
           clashFallback: form.clashFallback,
+          clashAutoType: form.clashAutoType,
+          clashLoadBalanceStrategy: form.clashLoadBalanceStrategy,
           clashAutoInterval: form.clashAutoInterval,
           clashAutoTolerance: form.clashAutoTolerance
         });
@@ -648,7 +654,9 @@ export function UsersPage() {
       clashFallbackMaxFailed: user.clashFallbackMaxFailed ?? 1,
       clashFallback: user.clashFallback ?? false,
       clashAutoInterval: user.clashAutoInterval ?? 600,
-      clashAutoTolerance: user.clashAutoTolerance ?? 50
+      clashAutoTolerance: user.clashAutoTolerance ?? 50,
+      clashAutoType: user.clashAutoType ?? "url-test",
+      clashLoadBalanceStrategy: user.clashLoadBalanceStrategy ?? "round-robin",
     });
     setAllocationForm(defaultAllocationForm);
     setFormError("");
@@ -1430,6 +1438,18 @@ export function UsersPage() {
                 </label>
 
                 <div className="space-y-3 rounded-2xl border border-violet-300/10 bg-violet-300/[0.04] p-4">
+                  <label className="block">
+                    <span className="mb-1.5 block text-xs font-medium text-slate-400">Auto Type</span>
+                    <select
+                      value={form.clashAutoType}
+                      onChange={(event) => setForm((current) => ({ ...current, clashAutoType: event.target.value }))}
+                      className="input-shell w-full"
+                    >
+                      <option value="url-test">URL Test</option>
+                      <option value="load-balance">Load Balance</option>
+                    </select>
+                  </label>
+
                   <div className="grid grid-cols-2 gap-3">
                     <label className="block">
                       <span className="mb-1.5 block text-xs font-medium text-slate-400">Auto Interval</span>
@@ -1441,16 +1461,33 @@ export function UsersPage() {
                         className="input-shell w-full"
                       />
                     </label>
-                    <label className="block">
-                      <span className="mb-1.5 block text-xs font-medium text-slate-400">Auto Tolerance</span>
-                      <input
-                        type="number"
-                        min={0}
-                        value={form.clashAutoTolerance}
-                        onChange={(event) => setForm((current) => ({ ...current, clashAutoTolerance: Number(event.target.value) || 0 }))}
-                        className="input-shell w-full"
-                      />
-                    </label>
+                    {form.clashAutoType === "url-test" && (
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-medium text-slate-400">Auto Tolerance</span>
+                        <input
+                          type="number"
+                          min={0}
+                          value={form.clashAutoTolerance}
+                          onChange={(event) => setForm((current) => ({ ...current, clashAutoTolerance: Number(event.target.value) || 0 }))}
+                          className="input-shell w-full"
+                        />
+                      </label>
+                    )}
+                    {form.clashAutoType === "load-balance" && (
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-medium text-slate-400">LB Strategy</span>
+                        <select
+                          value={form.clashLoadBalanceStrategy}
+                          onChange={(event) => setForm((current) => ({ ...current, clashLoadBalanceStrategy: event.target.value }))}
+                          className="input-shell w-full"
+                        >
+                          <option value="round-robin">Round Robin</option>
+                          <option value="consistent-hashing">Consistent Hashing</option>
+                          <option value="sticky-sessions">Sticky Sessions</option>
+                          <option value="least-load">Least Load</option>
+                        </select>
+                      </label>
+                    )}
                   </div>
 
                   <label className="flex items-center gap-3 text-sm font-semibold text-violet-200">

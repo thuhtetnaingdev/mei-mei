@@ -12,6 +12,8 @@ type User struct {
 	ClashFallback        bool                      `json:"clashFallback" gorm:"default:false"`
 	ClashAutoInterval    int                       `json:"clashAutoInterval" gorm:"default:600"`
 	ClashAutoTolerance   int                       `json:"clashAutoTolerance" gorm:"default:50"`
+	ClashAutoType        string                    `json:"clashAutoType" gorm:"default:url-test"`
+	ClashLoadBalanceStrategy string                `json:"clashLoadBalanceStrategy" gorm:"default:round-robin"`
 	ClashFallbackMode    string                    `json:"clashFallbackMode" gorm:"default:nodes"`
 	ClashFallbackInterval int                      `json:"clashFallbackInterval" gorm:"default:10"`
 	ClashFallbackCount   int                       `json:"clashFallbackCount" gorm:"default:10"`

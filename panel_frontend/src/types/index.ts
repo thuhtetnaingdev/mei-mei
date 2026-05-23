@@ -16,6 +16,8 @@ export interface User {
   clashFallbackTolerance: number;
   clashFallbackTimeout: number;
   clashFallbackMaxFailed: number;
+  clashAutoType: string;
+  clashLoadBalanceStrategy: string;
   expiresAt?: string | null;
   bandwidthLimitGb: number;
   bandwidthUsedBytes: number;

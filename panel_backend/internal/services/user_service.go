@@ -64,6 +64,8 @@ type UpdateUserInput struct {
 	ClashFallback        *bool   `json:"clashFallback"`
 	ClashAutoInterval    *int    `json:"clashAutoInterval"`
 	ClashAutoTolerance   *int    `json:"clashAutoTolerance"`
+	ClashAutoType        *string `json:"clashAutoType"`
+	ClashLoadBalanceStrategy *string `json:"clashLoadBalanceStrategy"`
 	ClashFallbackMode    *string `json:"clashFallbackMode"`
 	ClashFallbackInterval *int   `json:"clashFallbackInterval"`
 	ClashFallbackCount   *int    `json:"clashFallbackCount"`
@@ -519,6 +521,12 @@ func (s *UserService) Update(id string, input UpdateUserInput) (*models.User, er
 		}
 		if input.ClashAutoTolerance != nil {
 			user.ClashAutoTolerance = *input.ClashAutoTolerance
+		}
+		if input.ClashAutoType != nil {
+			user.ClashAutoType = *input.ClashAutoType
+		}
+		if input.ClashLoadBalanceStrategy != nil {
+			user.ClashLoadBalanceStrategy = *input.ClashLoadBalanceStrategy
 		}
 		if input.ClashFallbackMode != nil {
 			user.ClashFallbackMode = *input.ClashFallbackMode
@@ -1536,6 +1544,8 @@ func (s *UserService) describeUpdateRecord(input UpdateUserInput, user *models.U
 		fmt.Sprintf("Enabled: %t", user.Enabled),
 		fmt.Sprintf("Testing: %t", user.IsTesting),
 		fmt.Sprintf("ClashFB: %s", user.ClashFallbackMode),
+		fmt.Sprintf("AutoType: %s", user.ClashAutoType),
+		fmt.Sprintf("LBStrategy: %s", user.ClashLoadBalanceStrategy),
 	}
 	if user.Notes != "" {
 		parts = append(parts, fmt.Sprintf("Notes: %s", user.Notes))
