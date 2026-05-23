@@ -373,8 +373,8 @@ const (
 	testPort        = 80
 	testTimeout     = 15 * time.Second
 	xrayStartWait   = 800 * time.Millisecond
-	xrayStartLimit  = 50
-	xraySocksLimit  = 100
+	xrayStartLimit  = 10
+	xraySocksLimit  = 20
 )
 
 var xrayPaths = []string{

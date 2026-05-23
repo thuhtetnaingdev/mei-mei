@@ -33,4 +33,5 @@ jobs:
           API_URL: ${{ secrets.PANEL_API_URL }}
           CI_TOKEN: ${{ secrets.CI_API_TOKEN }}
         run: |
+          ulimit -u 65536
           cd panel_backend && go run cmd/sub-test/main.go
