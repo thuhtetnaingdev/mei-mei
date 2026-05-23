@@ -362,31 +362,8 @@ function NodeUsageRing({ percentage, emphasis }: NodeUsageRingProps) {
       </svg>
       <div className="absolute inset-0 flex items-center justify-center">
         <span className={`text-xs font-semibold ${textClass}`}>{Math.round(clampedPercentage)}%</span>
-                    <label className="block">
-                      <span className="mb-1.5 block text-xs font-medium text-slate-400">Timeout</span>
-                      <input
-                        type="number"
-                        min={1}
-                        disabled={!form.clashFallback}
-                        value={form.clashFallbackTimeout}
-                        onChange={(event) => setForm((current) => ({ ...current, clashFallbackTimeout: Number(event.target.value) || 1 }))}
-                        className="input-shell w-full disabled:cursor-not-allowed disabled:opacity-40"
-                      />
-                    </label>
-
-                    <label className="block">
-                      <span className="mb-1.5 block text-xs font-medium text-slate-400">Max Failed</span>
-                      <input
-                        type="number"
-                        min={1}
-                        disabled={!form.clashFallback}
-                        value={form.clashFallbackMaxFailed}
-                        onChange={(event) => setForm((current) => ({ ...current, clashFallbackMaxFailed: Number(event.target.value) || 1 }))}
-                        className="input-shell w-full disabled:cursor-not-allowed disabled:opacity-40"
-                      />
-                    </label>
-                  </div>
-                </div>
+      </div>
+    </div>
   );
 }
 
