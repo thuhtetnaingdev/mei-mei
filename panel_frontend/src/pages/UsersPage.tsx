@@ -514,6 +514,13 @@ export function UsersPage() {
     };
   }, []);
 
+  // When subIntegration is off, force node mode to "nodes"
+  useEffect(() => {
+    if (!form.subIntegration && form.clashNodeMode === "sub_integration") {
+      setForm((prev) => ({ ...prev, clashNodeMode: "nodes" }));
+    }
+  }, [form.subIntegration, form.clashNodeMode]);
+
   const closeUserDialog = () => {
     setForm(defaultFormState);
     setAllocationForm(defaultAllocationForm);
@@ -663,36 +670,47 @@ export function UsersPage() {
     setCopiedPublicUrl(false);
   };
 
-  const startEdit = (user: User) => {
-    const cs = user.clashSetting ?? {} as ClashSetting;
+  const [editLoading, setEditLoading] = useState(false);
+
+  const startEdit = async (user: User) => {
+    setEditLoading(true);
     setEditingUserId(user.id);
-    setForm({
-      email: user.email,
-      enabled: user.enabled,
-      isTesting: user.isTesting,
-      subIntegration: user.subIntegration,
-      notes: user.notes ?? "",
-      initialBandwidthGb: 0,
-      initialTokenAmount: 0,
-      initialExpiresAt: "",
-      clashNodeMode: cs.nodeMode ?? "sub_integration",
-      clashFallbackMode: cs.fallbackMode ?? "nodes",
-      clashFallbackInterval: cs.fallbackInterval ?? 10,
-      clashFallbackCount: cs.fallbackCount ?? 10,
-      clashFallbackTolerance: cs.fallbackTolerance ?? 50,
-      clashFallbackTimeout: cs.fallbackTimeout ?? 2000,
-      clashFallbackMaxFailed: cs.fallbackMaxFailed ?? 1,
-      clashFallback: cs.fallback ?? false,
-      clashAutoInterval: cs.autoInterval ?? 600,
-      clashAutoTolerance: cs.autoTolerance ?? 50,
-      clashAutoType: cs.autoType ?? "url-test",
-      clashLoadBalanceStrategy: cs.loadBalanceStrategy ?? "round-robin",
-      clashAutoTimeout: cs.autoTimeout ?? 2000,
-      clashAutoMaxFailed: cs.autoMaxFailed ?? 1,
-    });
-    setAllocationForm(defaultAllocationForm);
     setFormError("");
-    setUserDialogOpen(true);
+    try {
+      const res = await api.get<User>(`/users/${user.id}`);
+      const fresh = res.data;
+      const cs = fresh.clashSetting ?? {} as ClashSetting;
+      setForm({
+        email: fresh.email,
+        enabled: fresh.enabled,
+        isTesting: fresh.isTesting,
+        subIntegration: fresh.subIntegration,
+        notes: fresh.notes ?? "",
+        initialBandwidthGb: 0,
+        initialTokenAmount: 0,
+        initialExpiresAt: "",
+        clashNodeMode: cs.nodeMode ?? "sub_integration",
+        clashFallbackMode: cs.fallbackMode ?? "nodes",
+        clashFallbackInterval: cs.fallbackInterval ?? 10,
+        clashFallbackCount: cs.fallbackCount ?? 10,
+        clashFallbackTolerance: cs.fallbackTolerance ?? 50,
+        clashFallbackTimeout: cs.fallbackTimeout ?? 2000,
+        clashFallbackMaxFailed: cs.fallbackMaxFailed ?? 1,
+        clashFallback: cs.fallback ?? false,
+        clashAutoInterval: cs.autoInterval ?? 600,
+        clashAutoTolerance: cs.autoTolerance ?? 50,
+        clashAutoType: cs.autoType ?? "url-test",
+        clashLoadBalanceStrategy: cs.loadBalanceStrategy ?? "round-robin",
+        clashAutoTimeout: cs.autoTimeout ?? 2000,
+        clashAutoMaxFailed: cs.autoMaxFailed ?? 1,
+      });
+      setAllocationForm(defaultAllocationForm);
+      setUserDialogOpen(true);
+    } catch (error) {
+      setFormError(extractApiError(error, "Failed to load user details"));
+    } finally {
+      setEditLoading(false);
+    }
   };
 
   const openCreateDialog = () => {
@@ -1268,7 +1286,8 @@ export function UsersPage() {
                                   <QrCode className="h-3.5 w-3.5" />
                                 </button>
                                 <button
-                                  onClick={() => startEdit(user)}
+                                  onClick={() => void startEdit(user)}
+                                  disabled={editLoading}
                                   className="btn-secondary justify-center px-0 py-2 text-xs"
                                   title="Edit"
                                   aria-label={`Edit ${user.email}`}
@@ -1360,7 +1379,8 @@ export function UsersPage() {
 
                       {/* Action Buttons */}
                       <div className="grid grid-cols-3 gap-2">
-                        <button onClick={() => startEdit(user)} className="btn-secondary w-full justify-center px-0 py-2 text-xs">
+                        <button onClick={() => void startEdit(user)} disabled={editLoading} className="btn-secondary w-full justify-center px-0 py-2 text-xs">
+                          <Pencil className="h-4 w-4" />
                           Edit
                         </button>
                         <button onClick={() => void openAccess(user)} className="btn-primary w-full justify-center gap-1.5 px-0 py-2 text-xs">
@@ -1477,9 +1497,12 @@ export function UsersPage() {
                       onChange={(event) => setForm((current) => ({ ...current, clashNodeMode: event.target.value }))}
                       className="input-shell w-full"
                     >
-                      <option value="sub_integration">Sub Integration</option>
+                      <option value="sub_integration" disabled={!form.subIntegration}>Sub Integration</option>
                       <option value="nodes">Nodes</option>
                     </select>
+                    {!form.subIntegration && (
+                      <p className="mt-1 text-xs text-slate-500">Sub Integration mode requires "Sub Integration" to be enabled above.</p>
+                    )}
                   </label>
 
                   <label className="block">

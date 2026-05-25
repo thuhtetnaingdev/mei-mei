@@ -56,20 +56,20 @@ type CreateUserInput struct {
 }
 
 type UpdateClashSettingInput struct {
-	NodeMode            *string `json:"clashNodeMode"`
-	Fallback            *bool   `json:"clashFallback"`
-	AutoInterval        *int    `json:"clashAutoInterval"`
-	AutoTolerance       *int    `json:"clashAutoTolerance"`
-	AutoType            *string `json:"clashAutoType"`
-	LoadBalanceStrategy *string `json:"clashLoadBalanceStrategy"`
-	AutoTimeout         *int    `json:"clashAutoTimeout"`
-	AutoMaxFailed       *int    `json:"clashAutoMaxFailed"`
-	FallbackMode        *string `json:"clashFallbackMode"`
-	FallbackInterval    *int    `json:"clashFallbackInterval"`
-	FallbackCount       *int    `json:"clashFallbackCount"`
-	FallbackTolerance   *int    `json:"clashFallbackTolerance"`
-	FallbackTimeout     *int    `json:"clashFallbackTimeout"`
-	FallbackMaxFailed   *int    `json:"clashFallbackMaxFailed"`
+	NodeMode            *string `json:"nodeMode"`
+	Fallback            *bool   `json:"fallback"`
+	AutoInterval        *int    `json:"autoInterval"`
+	AutoTolerance       *int    `json:"autoTolerance"`
+	AutoType            *string `json:"autoType"`
+	LoadBalanceStrategy *string `json:"loadBalanceStrategy"`
+	AutoTimeout         *int    `json:"autoTimeout"`
+	AutoMaxFailed       *int    `json:"autoMaxFailed"`
+	FallbackMode        *string `json:"fallbackMode"`
+	FallbackInterval    *int    `json:"fallbackInterval"`
+	FallbackCount       *int    `json:"fallbackCount"`
+	FallbackTolerance   *int    `json:"fallbackTolerance"`
+	FallbackTimeout     *int    `json:"fallbackTimeout"`
+	FallbackMaxFailed   *int    `json:"fallbackMaxFailed"`
 }
 
 type UpdateUserInput struct {

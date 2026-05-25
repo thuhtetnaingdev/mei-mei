@@ -29,6 +29,9 @@ func isNodeBandwidthExceeded(node models.Node) bool {
 // filterAvailableNodes returns only nodes that are enabled and have not exceeded their bandwidth limit.
 // Testing users only receive testable nodes.
 func filterAvailableNodes(user models.User, nodes []models.Node) []models.Node {
+	if !user.Enabled {
+		return nil
+	}
 	available := make([]models.Node, 0, len(nodes))
 	for _, node := range nodes {
 		if user.IsTesting && !node.IsTestable {
