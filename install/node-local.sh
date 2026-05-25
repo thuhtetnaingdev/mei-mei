@@ -412,7 +412,10 @@ install_mieru() {
   fi
   echo "installing mieru from release asset"
   curl -fsSL "${download_url}" -o /tmp/mieru.tar.gz
-  sudo tar -xzf /tmp/mieru.tar.gz -C /usr/bin/ mieru
+  if ! sudo tar -xzf /tmp/mieru.tar.gz -C /usr/bin/ mieru 2>/dev/null; then
+    echo "warning: failed to extract mieru binary (tarball structure mismatch), skipping" >&2
+    return
+  fi
   sudo chmod +x /usr/bin/mieru
 }
 install_mieru

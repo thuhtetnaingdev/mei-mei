@@ -107,7 +107,7 @@ jobs:
           mkdir -p dist/mieru-linux-amd64
           tar -xzf /tmp/mieru-amd64.tar.gz -C dist/mieru-linux-amd64/ mieru
           chmod +x dist/mieru-linux-amd64/mieru
-          tar -C dist -czf dist/mieru-linux-amd64.tar.gz mieru-linux-amd64
+          tar -C dist/mieru-linux-amd64 -czf dist/mieru-linux-amd64.tar.gz mieru
 
       - name: Download mieru linux arm64
         run: |
@@ -116,7 +116,7 @@ jobs:
           mkdir -p dist/mieru-linux-arm64
           tar -xzf /tmp/mieru-arm64.tar.gz -C dist/mieru-linux-arm64/ mieru
           chmod +x dist/mieru-linux-arm64/mieru
-          tar -C dist -czf dist/mieru-linux-arm64.tar.gz mieru-linux-arm64
+          tar -C dist/mieru-linux-arm64 -czf dist/mieru-linux-arm64.tar.gz mieru
 
       - name: Build frontend bundle
         run: |
