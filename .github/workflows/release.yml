@@ -100,21 +100,22 @@ jobs:
           cd ..
           tar -C dist -czf dist/proxy-linux-arm64.tar.gz proxy-linux-arm64
 
-      - name: Build mieru linux amd64
+      - name: Download mieru linux amd64
         run: |
-          git clone --depth 1 https://github.com/nanahira/mieru /tmp/mieru
-          cd /tmp/mieru
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/mieru-amd64/mieru ./cmd/mieru
+          curl -fsSL -o /tmp/mieru-amd64.tar.gz \
+            https://github.com/enfein/mieru/releases/download/v3.32.0/mieru_3.32.0_linux_amd64.tar.gz
           mkdir -p dist/mieru-linux-amd64
-          cp /tmp/mieru-amd64/mieru dist/mieru-linux-amd64/
+          tar -xzf /tmp/mieru-amd64.tar.gz -C dist/mieru-linux-amd64/ mieru
+          chmod +x dist/mieru-linux-amd64/mieru
           tar -C dist -czf dist/mieru-linux-amd64.tar.gz mieru-linux-amd64
 
-      - name: Build mieru linux arm64
+      - name: Download mieru linux arm64
         run: |
-          cd /tmp/mieru
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /tmp/mieru-arm64/mieru ./cmd/mieru
+          curl -fsSL -o /tmp/mieru-arm64.tar.gz \
+            https://github.com/enfein/mieru/releases/download/v3.32.0/mieru_3.32.0_linux_arm64.tar.gz
           mkdir -p dist/mieru-linux-arm64
-          cp /tmp/mieru-arm64/mieru dist/mieru-linux-arm64/
+          tar -xzf /tmp/mieru-arm64.tar.gz -C dist/mieru-linux-arm64/ mieru
+          chmod +x dist/mieru-linux-arm64/mieru
           tar -C dist -czf dist/mieru-linux-arm64.tar.gz mieru-linux-arm64
 
       - name: Build frontend bundle
