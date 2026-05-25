@@ -141,10 +141,6 @@ func mieruServerPort(node models.Node) int {
 	return stableRandomPort(node, "mieru", map[int]struct{}{})
 }
 
-func mieruClientPort(index int) int {
-	return 11081 + index
-}
-
 func mieruUsername(nodeName, userUUID string) string {
 	sum := sha256.Sum256([]byte(nodeName + "|" + userUUID))
 	return "u_" + hex.EncodeToString(sum[:4])

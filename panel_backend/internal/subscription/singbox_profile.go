@@ -6,7 +6,6 @@ import (
 	"net"
 	"panel_backend/internal/models"
 	"panel_backend/internal/services"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -18,45 +17,7 @@ func GenerateSingboxProfile(user models.User, nodes []models.Node, settings serv
 
 func GenerateClashProfile(user models.User, nodes []models.Node, settings services.ProtocolSettings, extraOutbounds []map[string]interface{}) ([]byte, error) {
 	config := buildClashProfileConfig(user, nodes, settings, extraOutbounds)
-
-	data, err := yaml.Marshal(config)
-	if err != nil {
-		return nil, err
-	}
-
-	if user.ClashSetting != nil && user.ClashSetting.MieruEnabled {
-		availableNodes := filterAvailableNodes(user, nodes)
-		var mieruConfigs []map[string]interface{}
-		mieruIdx := 0
-		for _, node := range availableNodes {
-			port := mieruServerPort(node)
-			clientPort := mieruClientPort(mieruIdx)
-			mieruConfigs = append(mieruConfigs, map[string]interface{}{
-				"nodeName":        node.Name,
-				"serverAddress":   node.PublicHost,
-				"serverPort":      port,
-				"localSocks5Port": clientPort,
-				"username":        mieruUsername(node.Name, user.UUID),
-				"password":        mieruPassword(node.Name, user.UUID),
-				"cipher":          "aes-128-gcm",
-			})
-			mieruIdx++
-		}
-
-		mieruJSON, _ := json.MarshalIndent(mieruConfigs, "", "  ")
-		header := "# ╔══════════════════════════════════════════════════╗\n" +
-			"# ║  Mieru Client Config                             ║\n" +
-			"# ║  Copy this into your mieru client, then run:     ║\n" +
-			"# ║    mieru apply config ~/mieru-config.json         ║\n" +
-			"# ║    mieru start                                   ║\n" +
-			"# ╚══════════════════════════════════════════════════╝\n" +
-			"#\n" +
-			"# " + strings.ReplaceAll(string(mieruJSON), "\n", "\n# ") + "\n" +
-			"#\n"
-		data = append([]byte(header), data...)
-	}
-
-	return data, nil
+	return yaml.Marshal(config)
 }
 
 func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings services.ProtocolSettings, extraOutbounds []map[string]interface{}) map[string]interface{} {
@@ -474,20 +435,23 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		}
 	}
 
-	// Add Mieru SOCKS5 proxies if enabled
+	// Add Mieru proxies if enabled
 	if user.ClashSetting != nil && user.ClashSetting.MieruEnabled {
-		mieruIdx := 0
 		for _, node := range availableNodes {
-			port := mieruClientPort(mieruIdx)
+			port := mieruServerPort(node)
 			name := fmt.Sprintf("Mieru-%s", node.Name)
 			proxyNames = append(proxyNames, name)
 			proxies = append(proxies, map[string]interface{}{
-				"name":   name,
-				"type":   "socks5",
-				"server": "127.0.0.1",
-				"port":   port,
+				"name":           name,
+				"type":           "mieru",
+				"server":         node.PublicHost,
+				"port":           port,
+				"transport":      "TCP",
+				"username":       mieruUsername(node.Name, user.UUID),
+				"password":       mieruPassword(node.Name, user.UUID),
+				"multiplexing":   "MULTIPLEXING_LOW",
+				"traffic-pattern": "",
 			})
-			mieruIdx++
 		}
 	}
 
