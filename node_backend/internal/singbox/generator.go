@@ -211,20 +211,15 @@ func GenerateMieruServerConfig(nodeName, publicHost string, users []User) ([]byt
 		})
 	}
 	cfg := map[string]interface{}{
-		"port":   port,
-		"users":  mieruUsers,
-		"cipher": "aes-128-gcm",
-		"mtu":    1400,
-		"multiplexing": map[string]interface{}{
-			"enabled":    true,
-			"maxStreams": 8,
+		"portBindings": []map[string]interface{}{
+			{
+				"port":     port,
+				"protocol": "TCP",
+			},
 		},
-		"keepAlive": map[string]interface{}{
-			"enabled":   true,
-			"idleTime":  300,
-			"probeCount": 3,
-			"interval":  10,
-		},
+		"users":        mieruUsers,
+		"loggingLevel": "INFO",
+		"mtu":          1400,
 	}
 	return json.MarshalIndent(cfg, "", "  ")
 }

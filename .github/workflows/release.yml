@@ -100,23 +100,23 @@ jobs:
           cd ..
           tar -C dist -czf dist/proxy-linux-arm64.tar.gz proxy-linux-arm64
 
-      - name: Download mieru linux amd64
+      - name: Download mita linux amd64
         run: |
-          curl -fsSL -o /tmp/mieru-amd64.tar.gz \
-            https://github.com/enfein/mieru/releases/download/v3.32.0/mieru_3.32.0_linux_amd64.tar.gz
-          mkdir -p dist/mieru-linux-amd64
-          tar -xzf /tmp/mieru-amd64.tar.gz -C dist/mieru-linux-amd64/ mieru
-          chmod +x dist/mieru-linux-amd64/mieru
-          tar -C dist/mieru-linux-amd64 -czf dist/mieru-linux-amd64.tar.gz mieru
+          curl -fsSL -o /tmp/mita-amd64.tar.gz \
+            https://github.com/enfein/mieru/releases/download/v3.32.0/mita_3.32.0_linux_amd64.tar.gz
+          mkdir -p dist/mita-linux-amd64
+          tar -xzf /tmp/mita-amd64.tar.gz -C dist/mita-linux-amd64/ mita
+          chmod +x dist/mita-linux-amd64/mita
+          tar -C dist/mita-linux-amd64 -czf dist/mita-linux-amd64.tar.gz mita
 
-      - name: Download mieru linux arm64
+      - name: Download mita linux arm64
         run: |
-          curl -fsSL -o /tmp/mieru-arm64.tar.gz \
-            https://github.com/enfein/mieru/releases/download/v3.32.0/mieru_3.32.0_linux_arm64.tar.gz
-          mkdir -p dist/mieru-linux-arm64
-          tar -xzf /tmp/mieru-arm64.tar.gz -C dist/mieru-linux-arm64/ mieru
-          chmod +x dist/mieru-linux-arm64/mieru
-          tar -C dist/mieru-linux-arm64 -czf dist/mieru-linux-arm64.tar.gz mieru
+          curl -fsSL -o /tmp/mita-arm64.tar.gz \
+            https://github.com/enfein/mieru/releases/download/v3.32.0/mita_3.32.0_linux_arm64.tar.gz
+          mkdir -p dist/mita-linux-arm64
+          tar -xzf /tmp/mita-arm64.tar.gz -C dist/mita-linux-arm64/ mita
+          chmod +x dist/mita-linux-arm64/mita
+          tar -C dist/mita-linux-arm64 -czf dist/mita-linux-arm64.tar.gz mita
 
       - name: Build frontend bundle
         run: |
@@ -141,6 +141,6 @@ jobs:
             dist/singbox-v2ray-api-linux-arm64.tar.gz
             dist/proxy-linux-amd64.tar.gz
             dist/proxy-linux-arm64.tar.gz
-            dist/mieru-linux-amd64.tar.gz
-            dist/mieru-linux-arm64.tar.gz
+            dist/mita-linux-amd64.tar.gz
+            dist/mita-linux-arm64.tar.gz
             dist/panel_frontend.tar.gz

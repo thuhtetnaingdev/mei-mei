@@ -186,23 +186,26 @@ curl -fsSL "$download_url" -o "$tmp_dir/node_backend.tar.gz"
 
 ensure_compatible_singbox
 
-install_mieru() {
-  local mieru_asset_name="mieru-linux-${asset_arch}.tar.gz"
-  local mieru_url
-  mieru_url="$(release_asset_url "${mieru_asset_name}")"
-  if [[ -z "$mieru_url" ]]; then
-    echo "warning: mieru release asset not found, skipping mieru installation" >&2
+install_mita() {
+  local mita_asset_name="mita-linux-${asset_arch}.tar.gz"
+  local mita_url
+  mita_url="$(release_asset_url "${mita_asset_name}")"
+  if [[ -z "$mita_url" ]]; then
+    mita_url="https://github.com/enfein/mieru/releases/download/v3.32.0/mita_3.32.0_linux_${asset_arch}.tar.gz"
+  fi
+
+  echo "installing mita from release asset"
+  curl -fsSL "$mita_url" -o "${tmp_dir}/${mita_asset_name}"
+  if ! sudo tar -xzf "${tmp_dir}/${mita_asset_name}" -C /usr/bin/ mita 2>/dev/null; then
+    echo "warning: failed to extract mita binary (tarball structure mismatch), skipping" >&2
     return
   fi
-  echo "installing mieru from release asset"
-  curl -fsSL "$mieru_url" -o "${tmp_dir}/${mieru_asset_name}"
-  if ! sudo tar -xzf "${tmp_dir}/${mieru_asset_name}" -C /usr/bin/ mieru 2>/dev/null; then
-    echo "warning: failed to extract mieru binary (tarball structure mismatch), skipping" >&2
-    return
+  sudo chmod +x /usr/bin/mita
+  if ! id -u mita >/dev/null 2>&1; then
+    sudo useradd --system --no-create-home --shell /usr/sbin/nologin mita >/dev/null 2>&1 || true
   fi
-  sudo chmod +x /usr/bin/mieru
 }
-install_mieru
+install_mita
 
 pair_output="$(sing-box generate reality-keypair 2>/dev/null || true)"
 reality_private_key="$(printf '%s\n' "$pair_output" | sed -n 's/^PrivateKey:[[:space:]]*//p')"
@@ -250,7 +253,7 @@ SINGBOX_CONFIG_PATH=${INSTALL_DIR}/sing-box.generated.json
 SINGBOX_V2RAY_API_LISTEN=${SINGBOX_V2RAY_API_LISTEN}
 SINGBOX_RELOAD_COMMAND=systemctl restart meimei-sing-box.service
 MIERU_CONFIG_PATH=${INSTALL_DIR}/mieru-server.json
-MIERU_RELOAD_COMMAND=systemctl restart mieru-server
+MIERU_RELOAD_COMMAND=systemctl restart mieru-server && sleep 1 && systemctl is-active --quiet mieru-server
 NODE_BINARY_PATH=${INSTALL_DIR}/node_backend
 NODE_RESTART_COMMAND=systemctl restart meimei-node.service
 PUBLIC_HOST=${PUBLIC_HOST}
@@ -306,7 +309,9 @@ Wants=meimei-sing-box.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/mieru server
+Environment=MITA_CONFIG_JSON_FILE=${INSTALL_DIR}/mieru-server.json
+RuntimeDirectory=mita
+ExecStart=/usr/bin/mita run
 Restart=always
 RestartSec=5
 
@@ -323,8 +328,11 @@ fi
 sudo systemctl daemon-reload
 sudo systemctl enable meimei-sing-box.service
 
-if command -v mieru >/dev/null 2>&1; then
-  sudo systemctl enable --now mieru-server || true
+if command -v mita >/dev/null 2>&1; then
+  sudo systemctl enable mieru-server || true
+  if [[ -f "${INSTALL_DIR}/mieru-server.json" ]]; then
+    sudo systemctl restart mieru-server || true
+  fi
 fi
 
 sudo systemctl enable --now meimei-node.service
