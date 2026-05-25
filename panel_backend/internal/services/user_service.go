@@ -55,25 +55,30 @@ type CreateUserInput struct {
 	BandwidthAllocations []UserBandwidthAllocationInput `json:"bandwidthAllocations"`
 }
 
+type UpdateClashSettingInput struct {
+	NodeMode            *string `json:"clashNodeMode"`
+	Fallback            *bool   `json:"clashFallback"`
+	AutoInterval        *int    `json:"clashAutoInterval"`
+	AutoTolerance       *int    `json:"clashAutoTolerance"`
+	AutoType            *string `json:"clashAutoType"`
+	LoadBalanceStrategy *string `json:"clashLoadBalanceStrategy"`
+	AutoTimeout         *int    `json:"clashAutoTimeout"`
+	AutoMaxFailed       *int    `json:"clashAutoMaxFailed"`
+	FallbackMode        *string `json:"clashFallbackMode"`
+	FallbackInterval    *int    `json:"clashFallbackInterval"`
+	FallbackCount       *int    `json:"clashFallbackCount"`
+	FallbackTolerance   *int    `json:"clashFallbackTolerance"`
+	FallbackTimeout     *int    `json:"clashFallbackTimeout"`
+	FallbackMaxFailed   *int    `json:"clashFallbackMaxFailed"`
+}
+
 type UpdateUserInput struct {
-	Email                *string `json:"email"`
-	Enabled              *bool   `json:"enabled"`
-	IsTesting            *bool   `json:"isTesting"`
-	SubIntegration       *bool   `json:"subIntegration"`
-	Notes                *string `json:"notes"`
-	ClashFallback        *bool   `json:"clashFallback"`
-	ClashAutoInterval    *int    `json:"clashAutoInterval"`
-	ClashAutoTolerance   *int    `json:"clashAutoTolerance"`
-	ClashAutoType        *string `json:"clashAutoType"`
-	ClashLoadBalanceStrategy *string `json:"clashLoadBalanceStrategy"`
-	ClashAutoTimeout        *int    `json:"clashAutoTimeout"`
-	ClashAutoMaxFailed      *int    `json:"clashAutoMaxFailed"`
-	ClashFallbackMode    *string `json:"clashFallbackMode"`
-	ClashFallbackInterval *int   `json:"clashFallbackInterval"`
-	ClashFallbackCount   *int    `json:"clashFallbackCount"`
-	ClashFallbackTolerance *int  `json:"clashFallbackTolerance"`
-	ClashFallbackTimeout   *int  `json:"clashFallbackTimeout"`
-	ClashFallbackMaxFailed  *int  `json:"clashFallbackMaxFailed"`
+	Email          *string                 `json:"email"`
+	Enabled        *bool                   `json:"enabled"`
+	IsTesting      *bool                   `json:"isTesting"`
+	SubIntegration *bool                   `json:"subIntegration"`
+	Notes          *string                 `json:"notes"`
+	ClashSetting   *UpdateClashSettingInput `json:"clashSetting"`
 }
 
 // UserListOptions represents filtering and pagination options for user list queries
@@ -203,6 +208,12 @@ func (s *UserService) Create(input CreateUserInput) (*models.User, error) {
 			return err
 		}
 
+		cs := models.ClashSetting{UserID: user.ID}
+		if err := tx.Create(&cs).Error; err != nil {
+			return err
+		}
+		user.ClashSettingID = cs.ID
+
 		allocations := normalizeAllocationInputs(input.BandwidthAllocations, input.BandwidthLimitGB, input.ExpiresAt)
 		if user.IsTesting {
 			allocations = nil
@@ -233,12 +244,14 @@ func (s *UserService) List() ([]models.User, error) {
 
 	var users []models.User
 	err := s.db.
+		Preload("ClashSetting").
 		Preload("BandwidthAllocations", preloadUserAllocations).
 		Preload("BandwidthAllocations.NodeUsages").
 		Order("created_at desc").
 		Find(&users).Error
 	if err == nil {
 		for index := range users {
+			s.lazyInitClashSetting(&users[index])
 			s.hydrateUserSummary(&users[index])
 		}
 	}
@@ -337,6 +350,7 @@ func (s *UserService) ListWithFilters(opts UserListOptions) (*models.UserListRes
 	// Execute query with preloads
 	var users []models.User
 	err := query.
+		Preload("ClashSetting").
 		Preload("BandwidthAllocations", preloadUserAllocations).
 		Preload("BandwidthAllocations.NodeUsages").
 		Find(&users).Error
@@ -346,6 +360,7 @@ func (s *UserService) ListWithFilters(opts UserListOptions) (*models.UserListRes
 
 	// Hydrate user summaries
 	for index := range users {
+		s.lazyInitClashSetting(&users[index])
 		s.hydrateUserSummary(&users[index])
 	}
 
@@ -370,12 +385,14 @@ func (s *UserService) GetByID(id string) (*models.User, error) {
 
 	var user models.User
 	err := s.db.
+		Preload("ClashSetting").
 		Preload("BandwidthAllocations", preloadUserAllocations).
 		Preload("BandwidthAllocations.NodeUsages").
 		First(&user, "id = ?", id).Error
 	if err != nil {
 		return nil, err
 	}
+	s.lazyInitClashSetting(&user)
 	s.hydrateUserSummary(&user)
 	return &user, nil
 }
@@ -387,12 +404,14 @@ func (s *UserService) GetByUUID(uuid string) (*models.User, error) {
 
 	var user models.User
 	err := s.db.
+		Preload("ClashSetting").
 		Preload("BandwidthAllocations", preloadUserAllocations).
 		Preload("BandwidthAllocations.NodeUsages").
 		First(&user, "uuid = ?", uuid).Error
 	if err != nil {
 		return nil, err
 	}
+	s.lazyInitClashSetting(&user)
 	s.hydrateUserSummary(&user)
 	return &user, nil
 }
@@ -406,6 +425,7 @@ func (s *UserService) GetPublicUserByUUID(uuid string, basePublicURL string) (*m
 
 	var user models.User
 	err := s.db.
+		Preload("ClashSetting").
 		Preload("BandwidthAllocations", preloadUserAllocations).
 		First(&user, "uuid = ?", uuid).Error
 	if err != nil {
@@ -515,44 +535,57 @@ func (s *UserService) Update(id string, input UpdateUserInput) (*models.User, er
 		if input.Notes != nil {
 			user.Notes = *input.Notes
 		}
-		if input.ClashFallback != nil {
-			user.ClashFallback = *input.ClashFallback
-		}
-		if input.ClashAutoInterval != nil {
-			user.ClashAutoInterval = *input.ClashAutoInterval
-		}
-		if input.ClashAutoTolerance != nil {
-			user.ClashAutoTolerance = *input.ClashAutoTolerance
-		}
-		if input.ClashAutoType != nil {
-			user.ClashAutoType = *input.ClashAutoType
-		}
-		if input.ClashLoadBalanceStrategy != nil {
-			user.ClashLoadBalanceStrategy = *input.ClashLoadBalanceStrategy
-		}
-		if input.ClashAutoTimeout != nil {
-			user.ClashAutoTimeout = *input.ClashAutoTimeout
-		}
-		if input.ClashAutoMaxFailed != nil {
-			user.ClashAutoMaxFailed = *input.ClashAutoMaxFailed
-		}
-		if input.ClashFallbackMode != nil {
-			user.ClashFallbackMode = *input.ClashFallbackMode
-		}
-		if input.ClashFallbackInterval != nil {
-			user.ClashFallbackInterval = *input.ClashFallbackInterval
-		}
-		if input.ClashFallbackCount != nil {
-			user.ClashFallbackCount = *input.ClashFallbackCount
-		}
-		if input.ClashFallbackTolerance != nil {
-			user.ClashFallbackTolerance = *input.ClashFallbackTolerance
-		}
-		if input.ClashFallbackTimeout != nil {
-			user.ClashFallbackTimeout = *input.ClashFallbackTimeout
-		}
-		if input.ClashFallbackMaxFailed != nil {
-			user.ClashFallbackMaxFailed = *input.ClashFallbackMaxFailed
+		if input.ClashSetting != nil {
+			var cs models.ClashSetting
+			if err := tx.Where("user_id = ?", user.ID).First(&cs).Error; err != nil {
+				cs = models.ClashSetting{UserID: user.ID}
+			}
+			if input.ClashSetting.NodeMode != nil {
+				cs.NodeMode = *input.ClashSetting.NodeMode
+			}
+			if input.ClashSetting.Fallback != nil {
+				cs.Fallback = *input.ClashSetting.Fallback
+			}
+			if input.ClashSetting.AutoInterval != nil {
+				cs.AutoInterval = *input.ClashSetting.AutoInterval
+			}
+			if input.ClashSetting.AutoTolerance != nil {
+				cs.AutoTolerance = *input.ClashSetting.AutoTolerance
+			}
+			if input.ClashSetting.AutoType != nil {
+				cs.AutoType = *input.ClashSetting.AutoType
+			}
+			if input.ClashSetting.LoadBalanceStrategy != nil {
+				cs.LoadBalanceStrategy = *input.ClashSetting.LoadBalanceStrategy
+			}
+			if input.ClashSetting.AutoTimeout != nil {
+				cs.AutoTimeout = *input.ClashSetting.AutoTimeout
+			}
+			if input.ClashSetting.AutoMaxFailed != nil {
+				cs.AutoMaxFailed = *input.ClashSetting.AutoMaxFailed
+			}
+			if input.ClashSetting.FallbackMode != nil {
+				cs.FallbackMode = *input.ClashSetting.FallbackMode
+			}
+			if input.ClashSetting.FallbackInterval != nil {
+				cs.FallbackInterval = *input.ClashSetting.FallbackInterval
+			}
+			if input.ClashSetting.FallbackCount != nil {
+				cs.FallbackCount = *input.ClashSetting.FallbackCount
+			}
+			if input.ClashSetting.FallbackTolerance != nil {
+				cs.FallbackTolerance = *input.ClashSetting.FallbackTolerance
+			}
+			if input.ClashSetting.FallbackTimeout != nil {
+				cs.FallbackTimeout = *input.ClashSetting.FallbackTimeout
+			}
+			if input.ClashSetting.FallbackMaxFailed != nil {
+				cs.FallbackMaxFailed = *input.ClashSetting.FallbackMaxFailed
+			}
+			if err := tx.Save(&cs).Error; err != nil {
+				return err
+			}
+			user.ClashSettingID = cs.ID
 		}
 
 		if err := tx.Save(&user).Error; err != nil {
@@ -1551,11 +1584,15 @@ func (s *UserService) describeUpdateRecord(input UpdateUserInput, user *models.U
 		fmt.Sprintf("Email: %s", user.Email),
 		fmt.Sprintf("Enabled: %t", user.Enabled),
 		fmt.Sprintf("Testing: %t", user.IsTesting),
-		fmt.Sprintf("ClashFB: %s", user.ClashFallbackMode),
-		fmt.Sprintf("AutoType: %s", user.ClashAutoType),
-		fmt.Sprintf("LBStrategy: %s", user.ClashLoadBalanceStrategy),
-		fmt.Sprintf("AutoTimeout: %d", user.ClashAutoTimeout),
-		fmt.Sprintf("AutoMaxFail: %d", user.ClashAutoMaxFailed),
+	}
+	if user.ClashSetting != nil {
+		parts = append(parts,
+			fmt.Sprintf("ClashFB: %s", user.ClashSetting.FallbackMode),
+			fmt.Sprintf("AutoType: %s", user.ClashSetting.AutoType),
+			fmt.Sprintf("LBStrategy: %s", user.ClashSetting.LoadBalanceStrategy),
+			fmt.Sprintf("AutoTimeout: %d", user.ClashSetting.AutoTimeout),
+			fmt.Sprintf("AutoMaxFail: %d", user.ClashSetting.AutoMaxFailed),
+		)
 	}
 	if user.Notes != "" {
 		parts = append(parts, fmt.Sprintf("Notes: %s", user.Notes))
@@ -1615,6 +1652,19 @@ func (s *UserService) buildAdjustmentAdminWalletNote(input UserBandwidthAllocati
 		tokenDelta,
 		formatOptionalNote(input.Note),
 	)
+}
+
+func (s *UserService) lazyInitClashSetting(user *models.User) {
+	if user.ClashSetting != nil {
+		return
+	}
+	var cs models.ClashSetting
+	if err := s.db.Where("user_id = ?", user.ID).First(&cs).Error; err != nil {
+		cs = models.ClashSetting{UserID: user.ID}
+		s.db.Create(&cs)
+	}
+	user.ClashSetting = &cs
+	user.ClashSettingID = cs.ID
 }
 
 func (s *UserService) describeDeleteRecord(user *models.User, refundedTokens float64) string {

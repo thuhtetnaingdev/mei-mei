@@ -162,6 +162,7 @@ func NewRouterWithServices(cfg config.Config, db *gorm.DB, userService *services
 		protected.POST("/nodes/sync", handler.syncNodes)
 		protected.POST("/nodes/:id/verify-keys", handler.verifyNodeKeys)
 		protected.POST("/nodes/verify-all-keys", handler.verifyAllNodeKeys)
+		protected.PUT("/nodes/clash-roles", handler.bulkUpdateClashRoles)
 		protected.POST("/nodes/:id/fix-keys", handler.fixNodeKeys)
 		protected.POST("/nodes/:id/force-rotate-keys", handler.forceRotateKeys)
 		protected.GET("/nodes/:id/key-status", handler.getNodeKeyStatus)
@@ -1124,6 +1125,21 @@ func (h *Handler) getBootstrapStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, job)
+}
+
+func (h *Handler) bulkUpdateClashRoles(c *gin.Context) {
+	var body struct {
+		Nodes []services.BatchClashRoleUpdate `json:"nodes"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.nodeService.BatchUpdateClashRoles(body.Nodes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
 func (h *Handler) syncNodes(c *gin.Context) {

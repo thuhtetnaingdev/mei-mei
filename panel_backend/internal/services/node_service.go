@@ -859,6 +859,20 @@ func countEnabledSyncUsers(users []SyncUser) int {
 	return total
 }
 
+type BatchClashRoleUpdate struct {
+	ID   uint   `json:"id"`
+	Role string `json:"clashRole"`
+}
+
+func (s *NodeService) BatchUpdateClashRoles(updates []BatchClashRoleUpdate) error {
+	for _, u := range updates {
+		if err := s.db.Model(&models.Node{}).Where("id = ?", u.ID).Update("clash_role", u.Role).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type ReinstallNodeInput struct {
 	TargetArch string `json:"targetArch"`
 }

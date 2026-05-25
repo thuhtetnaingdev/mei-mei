@@ -333,6 +333,13 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 	proxyNames := make([]string, 0)
 	nodeProxyNames := make([]string, 0)
 
+	// Track node-to-proxy-name mapping for node mode filtering
+	type nodeProxyEntry struct {
+		nodeID uint
+		name   string
+	}
+	var nodeProxyEntries []nodeProxyEntry
+
 	for _, node := range availableNodes {
 		plan := buildNodeTransportPlan(node, settings)
 
@@ -340,6 +347,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 			name := variant.Tag
 			proxyNames = append(proxyNames, name)
 			nodeProxyNames = append(nodeProxyNames, name)
+			nodeProxyEntries = append(nodeProxyEntries, nodeProxyEntry{nodeID: node.ID, name: name})
 			proxies = append(proxies, map[string]interface{}{
 				"name":               name,
 				"type":               "vless",
@@ -362,6 +370,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 
 		if plan.TUIC.Port > 0 {
 			name := plan.TUIC.Tag
+			nodeProxyEntries = append(nodeProxyEntries, nodeProxyEntry{nodeID: node.ID, name: name})
 			tuicProxy := map[string]interface{}{
 				"name":                  name,
 				"type":                  "tuic",
@@ -389,6 +398,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		shadowsocks := buildShadowsocksVariant(node, user)
 		if shadowsocks.Port > 0 {
 			name := shadowsocks.Tag
+			nodeProxyEntries = append(nodeProxyEntries, nodeProxyEntry{nodeID: node.ID, name: name})
 			proxyNames = append(proxyNames, name)
 			nodeProxyNames = append(nodeProxyNames, name)
 			proxies = append(proxies, map[string]interface{}{
@@ -404,6 +414,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 
 		for _, variant := range plan.Hysteria2 {
 			name := variant.Tag
+			nodeProxyEntries = append(nodeProxyEntries, nodeProxyEntry{nodeID: node.ID, name: name})
 			proxyNames = append(proxyNames, name)
 			nodeProxyNames = append(nodeProxyNames, name)
 			proxy := map[string]interface{}{
@@ -421,6 +432,29 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 				proxy["obfs-password"] = variant.ObfsPassword
 			}
 			proxies = append(proxies, proxy)
+		}
+	}
+
+	// Build node-role-based proxy lists for node mode
+	var primaryNodeNames []string
+	var fallbackNodeNames []string
+	cs := user.ClashSetting
+	isNodeMode := cs != nil && cs.NodeMode == "nodes"
+	if isNodeMode {
+		nodeByID := make(map[uint]models.Node)
+		for _, n := range availableNodes {
+			nodeByID[n.ID] = n
+		}
+		for _, entry := range nodeProxyEntries {
+			n, ok := nodeByID[entry.nodeID]
+			if ok && n.ClashRole == "fallback" {
+				fallbackNodeNames = append(fallbackNodeNames, entry.name)
+			} else {
+				primaryNodeNames = append(primaryNodeNames, entry.name)
+			}
+		}
+		if len(primaryNodeNames) == 0 {
+			primaryNodeNames = proxyNames
 		}
 	}
 
@@ -443,22 +477,56 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 	}
 
 	autoGroupProxies := proxyNames
-	if user.ClashFallback {
-		if user.ClashFallbackMode == "sub_integration" {
-			autoGroupProxies = nodeProxyNames
-		} else {
-			autoGroupProxies = importedProxyNames
+	if user.ClashSetting != nil {
+		cs := user.ClashSetting
+		if cs.NodeMode == "nodes" {
+			autoGroupProxies = primaryNodeNames
+		} else if cs.Fallback {
+			if cs.FallbackMode == "sub_integration" {
+				autoGroupProxies = nodeProxyNames
+			} else {
+				autoGroupProxies = importedProxyNames
+			}
 		}
 	}
 	if len(autoGroupProxies) == 0 {
 		autoGroupProxies = []string{"DIRECT"}
 	}
 
-	autoType := user.ClashAutoType
+	autoType := ""
+	lbStrategy := ""
+	clashFallback := false
+	fallbackMode := "nodes"
+	autoInterval := 600
+	autoTolerance := 50
+	autoTimeout := 2000
+	autoMaxFailed := 1
+	fbInterval := 10
+	fbCount := 10
+	fbTolerance := 50
+	fbTimeout := 2000
+	fbMaxFailed := 1
+
+	if user.ClashSetting != nil {
+		cs := user.ClashSetting
+		autoType = cs.AutoType
+		lbStrategy = cs.LoadBalanceStrategy
+		clashFallback = cs.Fallback
+		fallbackMode = cs.FallbackMode
+		autoInterval = cs.AutoInterval
+		autoTolerance = cs.AutoTolerance
+		autoTimeout = cs.AutoTimeout
+		autoMaxFailed = cs.AutoMaxFailed
+		fbInterval = cs.FallbackInterval
+		fbCount = cs.FallbackCount
+		fbTolerance = cs.FallbackTolerance
+		fbTimeout = cs.FallbackTimeout
+		fbMaxFailed = cs.FallbackMaxFailed
+	}
+
 	if autoType == "" {
 		autoType = "url-test"
 	}
-	lbStrategy := user.ClashLoadBalanceStrategy
 	if lbStrategy == "" {
 		lbStrategy = "round-robin"
 	}
@@ -468,12 +536,12 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		"type":             autoType,
 		"proxies":          autoGroupProxies,
 		"url":              "http://www.gstatic.com/generate_204",
-		"interval":         user.ClashAutoInterval,
-		"timeout":          user.ClashAutoTimeout,
-		"max-failed-times": user.ClashAutoMaxFailed,
+		"interval":         autoInterval,
+		"timeout":          autoTimeout,
+		"max-failed-times": autoMaxFailed,
 	}
 	if autoType == "url-test" {
-		autoGroup["tolerance"] = user.ClashAutoTolerance
+		autoGroup["tolerance"] = autoTolerance
 	}
 	if autoType == "load-balance" {
 		autoGroup["strategy"] = lbStrategy
@@ -481,14 +549,16 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 
 	proxyGroups := []map[string]interface{}{autoGroup}
 
-	if user.ClashFallback {
+	if clashFallback {
 		var fbNames []string
-		if user.ClashFallbackMode == "sub_integration" {
+		if user.ClashSetting != nil && user.ClashSetting.NodeMode == "nodes" {
+			fbNames = fallbackNodeNames
+		} else if fallbackMode == "sub_integration" {
 			fbNames = importedProxyNames
 		} else {
 			fbNames = nodeProxyNames
 		}
-		fbLimit := user.ClashFallbackCount
+		fbLimit := fbCount
 		if fbLimit > 0 && len(fbNames) > fbLimit {
 			fbNames = fbNames[:fbLimit]
 		}
@@ -500,24 +570,24 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 					"type":      "url-test",
 					"proxies":   fbNames,
 					"url":       "http://www.gstatic.com/generate_204",
-					"interval":  user.ClashFallbackInterval,
-					"tolerance": user.ClashFallbackTolerance,
+					"interval":  fbInterval,
+					"tolerance": fbTolerance,
 				},
 				map[string]interface{}{
 					"name":             "FALLBACK",
 					"type":             "fallback",
 					"proxies":          []string{"AUTO", "Fallback-Nodes"},
 					"url":              "http://www.gstatic.com/generate_204",
-					"interval":         user.ClashFallbackInterval,
-					"timeout":          user.ClashFallbackTimeout,
-					"max-failed-times": user.ClashFallbackMaxFailed,
+					"interval":         fbInterval,
+					"timeout":          fbTimeout,
+					"max-failed-times": fbMaxFailed,
 				},
 			)
 		}
 	}
 
 	selectProxies := []string{}
-	if user.ClashFallback {
+	if clashFallback {
 		selectProxies = append(selectProxies, "FALLBACK")
 	}
 	selectProxies = append(selectProxies, "AUTO", "DIRECT")

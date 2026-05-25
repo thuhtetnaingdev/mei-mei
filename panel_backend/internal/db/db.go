@@ -38,6 +38,7 @@ func Connect(databasePath string) (*gorm.DB, error) {
 		&models.MintPoolEvent{},
 		&models.MintPoolTransferEvent{},
 		&models.SubscriptionIntegration{},
+		&models.ClashSetting{},
 	); err != nil {
 		return nil, err
 	}

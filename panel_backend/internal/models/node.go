@@ -25,6 +25,8 @@ type Node struct {
 	RealityShortID         string     `json:"realityShortId"`
 	RealityServerName      string     `json:"realityServerName"`
 	RealityPrivateKeyHash  string     `json:"realityPrivateKeyHash" gorm:"type:varchar(64)"`
+	ClashRole              string     `json:"clashRole" gorm:"default:primary"`
+	ClashOrder             int        `json:"clashOrder" gorm:"default:0"`
 	ProtocolToken          string     `json:"-" gorm:"not null"`
 	Enabled                bool       `json:"enabled" gorm:"default:true"`
 	IsTestable             bool       `json:"isTestable" gorm:"default:false"`

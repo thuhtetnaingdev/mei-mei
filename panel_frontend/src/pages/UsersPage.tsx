@@ -9,7 +9,7 @@ import { SectionCard } from "../components/SectionCard";
 import { Pagination } from "../components/Pagination";
 import { UserFilters } from "../components/UserFilters";
 import { localizeSubscriptionLinks } from "../utils/subscriptionLinks";
-import type { MintPoolSnapshot, Node, User, UserBandwidthAllocation, UserClassificationStatus, UserClassificationStats, UserListOptions, UserListResult, PaginationMeta } from "../types";
+import type { ClashSetting, MintPoolSnapshot, Node, User, UserBandwidthAllocation, UserClassificationStatus, UserClassificationStats, UserListOptions, UserListResult, PaginationMeta } from "../types";
 
 interface SubscriptionResponse {
   userId: number;
@@ -61,6 +61,7 @@ type UserFormState = {
   initialBandwidthGb: number;
   initialTokenAmount: number;
   initialExpiresAt: string;
+  clashNodeMode: string;
   clashFallbackMode: string;
   clashFallbackInterval: number;
   clashFallbackCount: number;
@@ -85,6 +86,7 @@ const defaultFormState: UserFormState = {
   initialBandwidthGb: 100,
   initialTokenAmount: 100,
   initialExpiresAt: "",
+  clashNodeMode: "sub_integration",
   clashFallbackMode: "nodes",
   clashFallbackInterval: 10,
   clashFallbackCount: 10,
@@ -546,25 +548,45 @@ export function UsersPage() {
     try {
       setUserSaving(true);
       if (editingUserId) {
+        const cs = form.clashNodeMode === "nodes"
+          ? {
+              nodeMode: form.clashNodeMode,
+              autoType: form.clashAutoType,
+              loadBalanceStrategy: form.clashLoadBalanceStrategy,
+              autoInterval: form.clashAutoInterval,
+              autoTolerance: form.clashAutoTolerance,
+              autoTimeout: form.clashAutoTimeout,
+              autoMaxFailed: form.clashAutoMaxFailed,
+              fallback: form.clashFallback,
+              fallbackCount: form.clashFallbackCount,
+              fallbackInterval: form.clashFallbackInterval,
+              fallbackTolerance: form.clashFallbackTolerance,
+              fallbackTimeout: form.clashFallbackTimeout,
+              fallbackMaxFailed: form.clashFallbackMaxFailed,
+            }
+          : {
+              nodeMode: form.clashNodeMode,
+              fallbackMode: form.clashFallbackMode,
+              autoType: form.clashAutoType,
+              loadBalanceStrategy: form.clashLoadBalanceStrategy,
+              autoInterval: form.clashAutoInterval,
+              autoTolerance: form.clashAutoTolerance,
+              autoTimeout: form.clashAutoTimeout,
+              autoMaxFailed: form.clashAutoMaxFailed,
+              fallback: form.clashFallback,
+              fallbackCount: form.clashFallbackCount,
+              fallbackInterval: form.clashFallbackInterval,
+              fallbackTolerance: form.clashFallbackTolerance,
+              fallbackTimeout: form.clashFallbackTimeout,
+              fallbackMaxFailed: form.clashFallbackMaxFailed,
+            };
         await api.patch(`/users/${editingUserId}`, {
           email: form.email,
           enabled: form.enabled,
           isTesting: form.isTesting,
           subIntegration: form.subIntegration,
           notes: form.notes,
-          clashFallbackMode: form.clashFallbackMode,
-          clashFallbackInterval: form.clashFallbackInterval,
-          clashFallbackCount: form.clashFallbackCount,
-          clashFallbackTolerance: form.clashFallbackTolerance,
-          clashFallbackTimeout: form.clashFallbackTimeout,
-          clashFallbackMaxFailed: form.clashFallbackMaxFailed,
-          clashFallback: form.clashFallback,
-          clashAutoType: form.clashAutoType,
-          clashLoadBalanceStrategy: form.clashLoadBalanceStrategy,
-          clashAutoInterval: form.clashAutoInterval,
-          clashAutoTolerance: form.clashAutoTolerance,
-          clashAutoTimeout: form.clashAutoTimeout,
-          clashAutoMaxFailed: form.clashAutoMaxFailed
+          clashSetting: cs
         });
         setFormStatus("User updated.");
       } else {
@@ -642,6 +664,7 @@ export function UsersPage() {
   };
 
   const startEdit = (user: User) => {
+    const cs = user.clashSetting ?? {} as ClashSetting;
     setEditingUserId(user.id);
     setForm({
       email: user.email,
@@ -652,19 +675,20 @@ export function UsersPage() {
       initialBandwidthGb: 0,
       initialTokenAmount: 0,
       initialExpiresAt: "",
-      clashFallbackMode: user.clashFallbackMode ?? "nodes",
-      clashFallbackInterval: user.clashFallbackInterval ?? 10,
-      clashFallbackCount: user.clashFallbackCount ?? 10,
-      clashFallbackTolerance: user.clashFallbackTolerance ?? 50,
-      clashFallbackTimeout: user.clashFallbackTimeout ?? 2000,
-      clashFallbackMaxFailed: user.clashFallbackMaxFailed ?? 1,
-      clashFallback: user.clashFallback ?? false,
-      clashAutoInterval: user.clashAutoInterval ?? 600,
-      clashAutoTolerance: user.clashAutoTolerance ?? 50,
-      clashAutoType: user.clashAutoType ?? "url-test",
-      clashLoadBalanceStrategy: user.clashLoadBalanceStrategy ?? "round-robin",
-      clashAutoTimeout: user.clashAutoTimeout ?? 2000,
-      clashAutoMaxFailed: user.clashAutoMaxFailed ?? 1,
+      clashNodeMode: cs.nodeMode ?? "sub_integration",
+      clashFallbackMode: cs.fallbackMode ?? "nodes",
+      clashFallbackInterval: cs.fallbackInterval ?? 10,
+      clashFallbackCount: cs.fallbackCount ?? 10,
+      clashFallbackTolerance: cs.fallbackTolerance ?? 50,
+      clashFallbackTimeout: cs.fallbackTimeout ?? 2000,
+      clashFallbackMaxFailed: cs.fallbackMaxFailed ?? 1,
+      clashFallback: cs.fallback ?? false,
+      clashAutoInterval: cs.autoInterval ?? 600,
+      clashAutoTolerance: cs.autoTolerance ?? 50,
+      clashAutoType: cs.autoType ?? "url-test",
+      clashLoadBalanceStrategy: cs.loadBalanceStrategy ?? "round-robin",
+      clashAutoTimeout: cs.autoTimeout ?? 2000,
+      clashAutoMaxFailed: cs.autoMaxFailed ?? 1,
     });
     setAllocationForm(defaultAllocationForm);
     setFormError("");
@@ -1447,6 +1471,18 @@ export function UsersPage() {
 
                 <div className="space-y-3 rounded-2xl border border-violet-300/10 bg-violet-300/[0.04] p-4">
                   <label className="block">
+                    <span className="mb-1.5 block text-xs font-medium text-slate-400">Node Mode</span>
+                    <select
+                      value={form.clashNodeMode}
+                      onChange={(event) => setForm((current) => ({ ...current, clashNodeMode: event.target.value }))}
+                      className="input-shell w-full"
+                    >
+                      <option value="sub_integration">Sub Integration</option>
+                      <option value="nodes">Nodes</option>
+                    </select>
+                  </label>
+
+                  <label className="block">
                     <span className="mb-1.5 block text-xs font-medium text-slate-400">Auto Type</span>
                     <select
                       value={form.clashAutoType}
@@ -1535,18 +1571,20 @@ export function UsersPage() {
                     <p className="text-xs text-slate-500">Requires both "Enabled for node sync" and "Sub Integration" to be on.</p>
                   )}
 
-                  <label className="block">
-                    <span className="mb-1.5 block text-xs font-medium text-slate-400">Fallback Mode</span>
-                    <select
-                      value={form.clashFallbackMode}
-                      disabled={!form.clashFallback}
-                      onChange={(event) => setForm((current) => ({ ...current, clashFallbackMode: event.target.value }))}
-                      className="input-shell w-full disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      <option value="nodes">Nodes</option>
-                      <option value="sub_integration">Sub Integration</option>
-                    </select>
-                  </label>
+                  {form.clashNodeMode !== "nodes" && (
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-medium text-slate-400">Fallback Mode</span>
+                      <select
+                        value={form.clashFallbackMode}
+                        disabled={!form.clashFallback}
+                        onChange={(event) => setForm((current) => ({ ...current, clashFallbackMode: event.target.value }))}
+                        className="input-shell w-full disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <option value="nodes">Nodes</option>
+                        <option value="sub_integration">Sub Integration</option>
+                      </select>
+                    </label>
+                  )}
 
                   <div className="grid grid-cols-3 gap-3">
                     <label className="block">

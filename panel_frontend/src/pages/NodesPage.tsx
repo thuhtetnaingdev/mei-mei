@@ -100,7 +100,17 @@ export function NodesPage() {
   const [bulkVerificationResults, setBulkVerificationResults] = useState<KeyVerificationResult[]>([]);
   const [showBulkResults, setShowBulkResults] = useState(false);
 
-  const loadNodes = () => api.get<Node[]>("/nodes").then((res) => setNodes(res.data));
+  // Node role management state
+  const [primaryNodes, setPrimaryNodes] = useState<Node[]>([]);
+  const [fallbackNodes, setFallbackNodes] = useState<Node[]>([]);
+  const [clashRolesSaving, setClashRolesSaving] = useState(false);
+
+  const loadNodes = () => api.get<Node[]>("/nodes").then((res) => {
+    setNodes(res.data);
+    const enabledNodes = res.data.filter((n) => n.enabled);
+    setPrimaryNodes(enabledNodes.filter((n) => n.clashRole !== "fallback"));
+    setFallbackNodes(enabledNodes.filter((n) => n.clashRole === "fallback"));
+  });
   const loadMiners = () => api.get<Miner[]>("/miners").then((res) => setMiners(res.data));
 
   useEffect(() => {
@@ -310,6 +320,33 @@ export function NodesPage() {
       setNodeActionStatus(getRequestErrorMessage(error, nextEnabled ? "Enable failed" : "Disable failed"));
     } finally {
       setIsTogglingNode(false);
+    }
+  };
+
+  const moveNodeToFallback = (node: Node) => {
+    setPrimaryNodes((prev) => prev.filter((n) => n.id !== node.id));
+    setFallbackNodes((prev) => [...prev, { ...node, clashRole: "fallback" }]);
+  };
+
+  const moveNodeToPrimary = (node: Node) => {
+    setFallbackNodes((prev) => prev.filter((n) => n.id !== node.id));
+    setPrimaryNodes((prev) => [...prev, { ...node, clashRole: "primary" }]);
+  };
+
+  const saveClashRoles = async () => {
+    setClashRolesSaving(true);
+    try {
+      const payload = [
+        ...primaryNodes.map((n) => ({ id: n.id, clashRole: "primary" })),
+        ...fallbackNodes.map((n) => ({ id: n.id, clashRole: "fallback" })),
+      ];
+      await api.put("/nodes/clash-roles", { nodes: payload });
+      setNodeActionStatus(`Saved node roles: ${primaryNodes.length} primary, ${fallbackNodes.length} fallback.`);
+      await loadNodes();
+    } catch (error) {
+      setNodeActionStatus(getRequestErrorMessage(error, "Failed to save clash roles"));
+    } finally {
+      setClashRolesSaving(false);
     }
   };
 
@@ -758,6 +795,69 @@ export function NodesPage() {
           </div>
         </SectionCard>
       ) : null}
+
+      <SectionCard eyebrow="Clash Node Roles" title="Primary / Fallback assignment" description="Nodes assigned as Primary go into the AUTO group; Fallback nodes go into the Fallback-Nodes group. All nodes remain selectable in Proxy." className="!p-4 sm:!p-5">
+        <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <p className="mb-2 text-sm font-medium text-slate-300">Primary ({primaryNodes.length})</p>
+              <div className="min-h-[200px] space-y-1.5 rounded-[18px] border border-white/10 bg-white/[0.03] p-2">
+                {primaryNodes.length === 0 && (
+                  <p className="p-3 text-center text-xs text-slate-500">No primary nodes</p>
+                )}
+                {primaryNodes.map((node) => (
+                  <div key={node.id} className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-white">{node.name}</p>
+                      <p className="text-xs text-slate-500">{node.location || "Unknown region"}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => moveNodeToFallback(node)}
+                      className="shrink-0 rounded-lg border border-white/10 px-2 py-1 text-xs text-slate-400 hover:border-amber-400/30 hover:text-amber-300"
+                    >
+                      → FB
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="mb-2 text-sm font-medium text-slate-300">Fallback ({fallbackNodes.length})</p>
+              <div className="min-h-[200px] space-y-1.5 rounded-[18px] border border-white/10 bg-white/[0.03] p-2">
+                {fallbackNodes.length === 0 && (
+                  <p className="p-3 text-center text-xs text-slate-500">No fallback nodes</p>
+                )}
+                {fallbackNodes.map((node) => (
+                  <div key={node.id} className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-white">{node.name}</p>
+                      <p className="text-xs text-slate-500">{node.location || "Unknown region"}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => moveNodeToPrimary(node)}
+                      className="shrink-0 rounded-lg border border-white/10 px-2 py-1 text-xs text-slate-400 hover:border-emerald-400/30 hover:text-emerald-300"
+                    >
+                      ← PR
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => void saveClashRoles()}
+              disabled={clashRolesSaving}
+              className="btn-primary gap-1.5 px-4 py-2 text-sm"
+            >
+              {clashRolesSaving ? "Saving..." : "Save Roles"}
+            </button>
+          </div>
+        </div>
+      </SectionCard>
 
       <SectionCard eyebrow="Node Inventory" title="Registered nodes" description="A denser inventory view with the key facts and actions kept on one screen." className="!p-4 sm:!p-5">
         <div className="space-y-3">

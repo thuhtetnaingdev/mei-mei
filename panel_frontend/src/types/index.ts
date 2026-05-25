@@ -1,5 +1,24 @@
 export type UserType = "light" | "medium" | "moderate" | "unknown";
 
+export interface ClashSetting {
+  id: number;
+  userId: number;
+  nodeMode: string;
+  fallback: boolean;
+  autoInterval: number;
+  autoTolerance: number;
+  autoType: string;
+  loadBalanceStrategy: string;
+  autoTimeout: number;
+  autoMaxFailed: number;
+  fallbackMode: string;
+  fallbackInterval: number;
+  fallbackCount: number;
+  fallbackTolerance: number;
+  fallbackTimeout: number;
+  fallbackMaxFailed: number;
+}
+
 export interface User {
   id: number;
   uuid: string;
@@ -7,19 +26,7 @@ export interface User {
   enabled: boolean;
   isTesting: boolean;
   subIntegration: boolean;
-  clashFallback: boolean;
-  clashAutoInterval: number;
-  clashAutoTolerance: number;
-  clashFallbackMode: string;
-  clashFallbackInterval: number;
-  clashFallbackCount: number;
-  clashFallbackTolerance: number;
-  clashFallbackTimeout: number;
-  clashFallbackMaxFailed: number;
-  clashAutoType: string;
-  clashLoadBalanceStrategy: string;
-  clashAutoTimeout: number;
-  clashAutoMaxFailed: number;
+  clashSetting?: ClashSetting;
   expiresAt?: string | null;
   bandwidthLimitGb: number;
   bandwidthUsedBytes: number;
@@ -121,6 +128,8 @@ export interface Node {
   singboxVersion: string;
   lastHeartbeat?: string | null;
   lastSyncAt?: string | null;
+  clashRole?: string;
+  clashOrder?: number;
 }
 
 export interface NodePortDiagnostic {
