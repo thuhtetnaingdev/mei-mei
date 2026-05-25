@@ -1497,11 +1497,11 @@ export function UsersPage() {
                       onChange={(event) => setForm((current) => ({ ...current, clashNodeMode: event.target.value }))}
                       className="input-shell w-full"
                     >
-                      <option value="sub_integration" disabled={!form.subIntegration}>Sub Integration</option>
+                      <option value="sub_integration" disabled={!form.subIntegration}>Nodes + Sub Integration</option>
                       <option value="nodes">Nodes</option>
                     </select>
                     {!form.subIntegration && (
-                      <p className="mt-1 text-xs text-slate-500">Sub Integration mode requires "Sub Integration" to be enabled above.</p>
+                      <p className="mt-1 text-xs text-slate-500">Requires "Sub Integration" to be enabled above.</p>
                     )}
                   </label>
 
@@ -1584,14 +1584,18 @@ export function UsersPage() {
                     <input
                       type="checkbox"
                       checked={form.clashFallback}
-                      disabled={!form.enabled || !form.subIntegration}
+                      disabled={!form.enabled || (form.clashNodeMode !== "nodes" && !form.subIntegration)}
                       onChange={(event) => setForm((current) => ({ ...current, clashFallback: event.target.checked }))}
                       className="h-4 w-4 rounded border-white/20 bg-transparent disabled:cursor-not-allowed disabled:opacity-40"
                     />
                     Clash Fallback
                   </label>
-                  {(!form.enabled || !form.subIntegration) && (
-                    <p className="text-xs text-slate-500">Requires both "Enabled for node sync" and "Sub Integration" to be on.</p>
+                  {(!form.enabled || (form.clashNodeMode !== "nodes" && !form.subIntegration)) && (
+                    <p className="text-xs text-slate-500">
+                      {form.clashNodeMode === "nodes"
+                        ? 'Requires "Enabled for node sync" to be on.'
+                        : 'Requires both "Enabled for node sync" and "Sub Integration" to be on.'}
+                    </p>
                   )}
 
                   {form.clashNodeMode !== "nodes" && (
