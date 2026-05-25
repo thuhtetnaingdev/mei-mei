@@ -35,6 +35,8 @@ type Config struct {
 	DNSDisableExpire            bool
 	DNSIndependentCache         bool
 	DNSReverseMapping           bool
+	MieruConfigPath             string
+	MieruReloadCommand          string
 }
 
 func Load() Config {
@@ -60,6 +62,8 @@ func Load() Config {
 		TLSCertificatePath:          getEnv("TLS_CERTIFICATE_PATH", "/opt/meimei-node/tls.crt"),
 		TLSKeyPath:                  getEnv("TLS_KEY_PATH", "/opt/meimei-node/tls.key"),
 		TLSServerName:               getEnv("TLS_SERVER_NAME", getEnv("PUBLIC_HOST", "node.example.com")),
+		MieruConfigPath:             getEnv("MIERU_CONFIG_PATH", "/opt/meimei-node/mieru-server.json"),
+		MieruReloadCommand:          getEnv("MIERU_RELOAD_COMMAND", "systemctl restart mieru-server"),
 		DNSServers:                  getEnv("DNS_SERVERS", "8.8.8.8,1.1.1.1"),
 		DNSStrategy:                 getEnv("DNS_STRATEGY", "prefer_ipv4"),
 		DNSDisableCache:             getEnvAsBool("DNS_DISABLE_CACHE", false),

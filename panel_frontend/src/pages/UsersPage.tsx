@@ -75,6 +75,7 @@ type UserFormState = {
   clashLoadBalanceStrategy: string;
   clashAutoTimeout: number;
   clashAutoMaxFailed: number;
+  clashMieruEnabled: boolean;
 };
 
 const defaultFormState: UserFormState = {
@@ -100,6 +101,7 @@ const defaultFormState: UserFormState = {
   clashLoadBalanceStrategy: "round-robin",
   clashAutoTimeout: 2000,
   clashAutoMaxFailed: 1,
+  clashMieruEnabled: false,
 };
 
 type AllocationFormState = {
@@ -570,6 +572,7 @@ export function UsersPage() {
               fallbackTolerance: form.clashFallbackTolerance,
               fallbackTimeout: form.clashFallbackTimeout,
               fallbackMaxFailed: form.clashFallbackMaxFailed,
+              mieruEnabled: form.clashMieruEnabled,
             }
           : {
               nodeMode: form.clashNodeMode,
@@ -586,6 +589,7 @@ export function UsersPage() {
               fallbackTolerance: form.clashFallbackTolerance,
               fallbackTimeout: form.clashFallbackTimeout,
               fallbackMaxFailed: form.clashFallbackMaxFailed,
+              mieruEnabled: form.clashMieruEnabled,
             };
         await api.patch(`/users/${editingUserId}`, {
           email: form.email,
@@ -697,6 +701,7 @@ export function UsersPage() {
         clashFallbackTimeout: cs.fallbackTimeout ?? 2000,
         clashFallbackMaxFailed: cs.fallbackMaxFailed ?? 1,
         clashFallback: cs.fallback ?? false,
+        clashMieruEnabled: cs.mieruEnabled ?? false,
         clashAutoInterval: cs.autoInterval ?? 600,
         clashAutoTolerance: cs.autoTolerance ?? 50,
         clashAutoType: cs.autoType ?? "url-test",
@@ -1676,6 +1681,20 @@ export function UsersPage() {
                       />
                     </label>
                   </div>
+
+                  <label className="flex items-center gap-3 text-sm font-semibold text-violet-200">
+                    <input
+                      type="checkbox"
+                      checked={form.clashMieruEnabled}
+                      disabled={!form.enabled || (form.clashNodeMode !== "nodes" && !form.subIntegration)}
+                      onChange={(event) => setForm((current) => ({ ...current, clashMieruEnabled: event.target.checked }))}
+                      className="h-4 w-4 rounded border-white/20 bg-transparent disabled:cursor-not-allowed disabled:opacity-40"
+                    />
+                    Mieru Protocol
+                  </label>
+                  {(!form.enabled || (form.clashNodeMode !== "nodes" && !form.subIntegration)) && (
+                    <p className="text-xs text-slate-500">Requires "Enabled for node sync" and "Sub Integration" to be on.</p>
+                  )}
                 </div>
 
                 {form.isTesting ? (

@@ -17,6 +17,7 @@ export interface ClashSetting {
   fallbackTolerance: number;
   fallbackTimeout: number;
   fallbackMaxFailed: number;
+  mieruEnabled: boolean;
 }
 
 export interface User {

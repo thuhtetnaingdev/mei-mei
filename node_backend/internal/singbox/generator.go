@@ -193,6 +193,42 @@ func Generate(
 	return json.MarshalIndent(cfg, "", "  ")
 }
 
+type MieruUser struct {
+	Name     string `json:"name"`
+	Password string `json:"password"`
+}
+
+func GenerateMieruServerConfig(nodeName, publicHost string, users []User) ([]byte, error) {
+	port := MieruServerPort(nodeName, publicHost)
+	mieruUsers := make([]MieruUser, 0, len(users))
+	for _, user := range users {
+		if !user.Enabled {
+			continue
+		}
+		mieruUsers = append(mieruUsers, MieruUser{
+			Name:     MieruUsername(nodeName, user.UUID),
+			Password: MieruPassword(nodeName, user.UUID),
+		})
+	}
+	cfg := map[string]interface{}{
+		"port":   port,
+		"users":  mieruUsers,
+		"cipher": "aes-128-gcm",
+		"mtu":    1400,
+		"multiplexing": map[string]interface{}{
+			"enabled":    true,
+			"maxStreams": 8,
+		},
+		"keepAlive": map[string]interface{}{
+			"enabled":   true,
+			"idleTime":  300,
+			"probeCount": 3,
+			"interval":  10,
+		},
+	}
+	return json.MarshalIndent(cfg, "", "  ")
+}
+
 func buildDNSConfig(servers string, strategy string, disableCache, disableExpire, independentCache, reverseMapping bool) map[string]interface{} {
 	if strings.TrimSpace(servers) == "" {
 		return nil

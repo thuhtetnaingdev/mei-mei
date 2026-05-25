@@ -137,6 +137,24 @@ func shadowsocksPort(node models.Node) int {
 	return stableRandomPort(node, "shadowsocks", map[int]struct{}{})
 }
 
+func mieruServerPort(node models.Node) int {
+	return stableRandomPort(node, "mieru", map[int]struct{}{})
+}
+
+func mieruClientPort(index int) int {
+	return 11081 + index
+}
+
+func mieruUsername(nodeName, userUUID string) string {
+	sum := sha256.Sum256([]byte(nodeName + "|" + userUUID))
+	return "u_" + hex.EncodeToString(sum[:4])
+}
+
+func mieruPassword(nodeName, userUUID string) string {
+	sum := sha256.Sum256([]byte(nodeName + "|" + userUUID + "|mieru"))
+	return hex.EncodeToString(sum[:8])
+}
+
 func labelSuffixFromValue(value string, index int) string {
 	if parsed, err := url.Parse(value); err == nil {
 		if parsed.Host != "" {

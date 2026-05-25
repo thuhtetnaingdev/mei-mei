@@ -100,6 +100,23 @@ jobs:
           cd ..
           tar -C dist -czf dist/proxy-linux-arm64.tar.gz proxy-linux-arm64
 
+      - name: Build mieru linux amd64
+        run: |
+          git clone --depth 1 https://github.com/nanahira/mieru /tmp/mieru
+          cd /tmp/mieru
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/mieru-amd64/mieru ./cmd/mieru
+          mkdir -p dist/mieru-linux-amd64
+          cp /tmp/mieru-amd64/mieru dist/mieru-linux-amd64/
+          tar -C dist -czf dist/mieru-linux-amd64.tar.gz mieru-linux-amd64
+
+      - name: Build mieru linux arm64
+        run: |
+          cd /tmp/mieru
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /tmp/mieru-arm64/mieru ./cmd/mieru
+          mkdir -p dist/mieru-linux-arm64
+          cp /tmp/mieru-arm64/mieru dist/mieru-linux-arm64/
+          tar -C dist -czf dist/mieru-linux-arm64.tar.gz mieru-linux-arm64
+
       - name: Build frontend bundle
         run: |
           cd panel_frontend
@@ -123,4 +140,6 @@ jobs:
             dist/singbox-v2ray-api-linux-arm64.tar.gz
             dist/proxy-linux-amd64.tar.gz
             dist/proxy-linux-arm64.tar.gz
+            dist/mieru-linux-amd64.tar.gz
+            dist/mieru-linux-arm64.tar.gz
             dist/panel_frontend.tar.gz

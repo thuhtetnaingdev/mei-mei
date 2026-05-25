@@ -49,6 +49,8 @@ type ConfigService struct {
 	syncVerificationStatus string
 	syncVerificationError  string
 	syncVerificationAt     *time.Time
+	mieruRunning           bool
+	mieruPort              int
 
 	// Debouncing for config changes
 	configChangeMu   sync.Mutex
@@ -188,6 +190,8 @@ func (s *ConfigService) Apply(req ApplyConfigRequest) error {
 		return err
 	}
 
+	s.writeAndRestartMieru(effectiveNodeName, req.Users)
+
 	layout := singbox.BuildTransportLayout(effectiveNodeName, s.cfg.PublicHost, req.RealitySNIs, req.Hysteria2Masquerades)
 	shadowsocksPlans := singbox.BuildShadowsocksInboundPlans(effectiveNodeName, s.cfg.PublicHost, users)
 	activePorts := make([]int, 0, len(layout.VLESS)+len(layout.Hysteria2)+len(shadowsocksPlans)+1)
@@ -250,6 +254,8 @@ func (s *ConfigService) Status() map[string]interface{} {
 		"syncVerificationStatus": valueOrDefault(s.syncVerificationStatus, "unknown"),
 		"syncVerificationError":  s.syncVerificationError,
 		"syncVerificationAt":     s.syncVerificationAt,
+		"mieruRunning":           s.mieruRunning,
+		"mieruPort":              s.mieruPort,
 	}
 }
 
@@ -294,6 +300,45 @@ func (s *ConfigService) StartBandwidthMonitoring(ctx context.Context, interval t
 func (s *ConfigService) reload() error {
 	cmd := exec.Command("sh", "-c", s.cfg.SingboxReloadCommand)
 	return cmd.Run()
+}
+
+func (s *ConfigService) writeAndRestartMieru(nodeName string, users []ApplyConfigUser) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	singUsers := make([]singbox.User, 0, len(users))
+	for _, u := range users {
+		singUsers = append(singUsers, singbox.User{
+			ID:      u.ID,
+			UUID:    u.UUID,
+			Email:   u.Email,
+			Enabled: u.Enabled,
+		})
+	}
+
+	payload, err := singbox.GenerateMieruServerConfig(nodeName, s.cfg.PublicHost, singUsers)
+	if err != nil {
+		log.Printf("[config-service] failed to generate mieru config: %v", err)
+		s.mieruRunning = false
+		return
+	}
+
+	if err := os.WriteFile(s.cfg.MieruConfigPath, payload, 0o644); err != nil {
+		log.Printf("[config-service] failed to write mieru config: %v", err)
+		s.mieruRunning = false
+		return
+	}
+
+	s.mieruPort = singbox.MieruServerPort(nodeName, s.cfg.PublicHost)
+
+	if err := exec.Command("sh", "-c", s.cfg.MieruReloadCommand).Run(); err != nil {
+		log.Printf("[config-service] mieru restart failed: %v", err)
+		s.mieruRunning = false
+		return
+	}
+
+	s.mieruRunning = true
+	log.Printf("[config-service] mieru config written and server restarted on port %d", s.mieruPort)
 }
 
 func (s *ConfigService) validateSingboxConfig() error {

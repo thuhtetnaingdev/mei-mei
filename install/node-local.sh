@@ -392,6 +392,31 @@ ensure_compatible_singbox() {
 }
 
 ensure_compatible_singbox
+
+install_mieru() {
+  local mieru_asset_name
+  local mieru_url
+  local repo="${MEIMEI_REPO:-thuhtetnaingdev/mei-mei}"
+  local version="${MEIMEI_VERSION:-latest}"
+  if [[ "${version}" == "latest" ]]; then
+    mieru_url="https://api.github.com/repos/${repo}/releases/latest"
+  else
+    mieru_url="https://api.github.com/repos/${repo}/releases/tags/${version}"
+  fi
+  mieru_asset_name="mieru-linux-${asset_arch}.tar.gz"
+  local download_url
+  download_url="$(curl -fsSL "${mieru_url}" | grep '"browser_download_url"' | grep "${mieru_asset_name}" | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')" || true
+  if [[ -z "${download_url}" ]]; then
+    echo "warning: mieru release asset not found, skipping mieru installation" >&2
+    return
+  fi
+  echo "installing mieru from release asset"
+  curl -fsSL "${download_url}" -o /tmp/mieru.tar.gz
+  sudo tar -xzf /tmp/mieru.tar.gz -C /usr/bin/ mieru
+  sudo chmod +x /usr/bin/mieru
+}
+install_mieru
+
 reality_private_key="$(read_existing_env VLESS_REALITY_PRIVATE_KEY)"
 reality_public_key="$(read_existing_env VLESS_REALITY_PUBLIC_KEY)"
 if [[ -z "${reality_private_key}" || -z "${reality_public_key}" ]]; then
@@ -473,6 +498,8 @@ CONTROL_PLANE_SHARED_TOKEN=${CONTROL_PLANE_TOKEN}
 SINGBOX_CONFIG_PATH=${INSTALL_DIR}/sing-box.generated.json
 SINGBOX_V2RAY_API_LISTEN=${SINGBOX_V2RAY_API_LISTEN}
 SINGBOX_RELOAD_COMMAND=systemctl restart meimei-sing-box.service
+MIERU_CONFIG_PATH=${INSTALL_DIR}/mieru-server.json
+MIERU_RELOAD_COMMAND=systemctl restart mieru-server
 NODE_BINARY_PATH=${INSTALL_DIR}/node_backend
 NODE_RESTART_COMMAND=systemctl restart meimei-node.service
 PUBLIC_HOST=${PUBLIC_HOST}
@@ -526,6 +553,22 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
+sudo tee /etc/systemd/system/mieru-server.service >/dev/null <<EOF
+[Unit]
+Description=Mieru Proxy Server
+After=network.target
+Wants=meimei-sing-box.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/mieru server
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 kill_port_processes "${NODE_PORT}"
 
 if command -v ufw >/dev/null 2>&1; then
@@ -534,6 +577,11 @@ fi
 
 sudo systemctl daemon-reload
 sudo systemctl enable meimei-sing-box.service
+
+if command -v mieru >/dev/null 2>&1; then
+  sudo systemctl enable --now mieru-server || true
+fi
+
 sudo systemctl enable --now meimei-node.service
 sudo systemctl restart meimei-sing-box.service
 

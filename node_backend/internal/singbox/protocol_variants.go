@@ -137,6 +137,20 @@ func obfuscationPassword(nodeName, publicHost, target string, index int) string 
 	return hex.EncodeToString(sum[:12])
 }
 
+func MieruServerPort(nodeName, publicHost string) int {
+	return stableRandomPort(nodeName, publicHost, "mieru", map[int]struct{}{})
+}
+
+func MieruUsername(nodeName, userUUID string) string {
+	sum := sha256.Sum256([]byte(nodeName + "|" + userUUID))
+	return "u_" + hex.EncodeToString(sum[:4])
+}
+
+func MieruPassword(nodeName, userUUID string) string {
+	sum := sha256.Sum256([]byte(nodeName + "|" + userUUID + "|mieru"))
+	return hex.EncodeToString(sum[:8])
+}
+
 func stableRandomPort(nodeName, publicHost, key string, usedPorts map[int]struct{}) int {
 	rangeSize := portRangeEnd - portRangeStart + 1
 	sum := sha256.Sum256([]byte(nodeName + "|" + publicHost + "|" + key))
