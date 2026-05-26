@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"panel_backend/internal/subscription"
@@ -79,6 +80,13 @@ func main() {
 			}
 			continue
 		}
+		const maxProxies = 15000
+		if len(uris) > maxProxies {
+			rand.Shuffle(len(uris), func(i, j int) { uris[i], uris[j] = uris[j], uris[i] })
+			uris = uris[:maxProxies]
+			fmt.Printf("  limited to %d proxies (shuffled)\n", len(uris))
+		}
+
 		parsed := subscription.ParseAll(uris)
 		fmt.Printf("  parsed %d proxies\n", len(parsed))
 
