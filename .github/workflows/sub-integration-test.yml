@@ -1,12 +1,6 @@
 name: Sub Integration Test
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'panel_backend/cmd/sub-test/**'
-      - 'panel_backend/internal/subscription/**'
-      - '.github/workflows/sub-integration-test.yml'
   schedule:
     - cron: '0 */3 * * *'
   workflow_dispatch:

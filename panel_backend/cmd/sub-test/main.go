@@ -79,7 +79,7 @@ func main() {
 			}
 			continue
 		}
-		const maxProxies = 150000
+		const maxProxies = 15000
 		if len(uris) > maxProxies {
 			uris = uris[:maxProxies]
 			fmt.Printf("  limited to %d proxies\n", len(uris))
