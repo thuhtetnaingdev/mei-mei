@@ -744,12 +744,6 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		"proxies": proxies,
 		"proxy-groups": proxyGroups,
 		"rules": []string{
-			"DOMAIN,dns.google,REJECT",
-			"DOMAIN,dns.quad9.net,REJECT",
-			"DOMAIN,cloudflare-dns.com,REJECT",
-			"DOMAIN,doh.opendns.com,REJECT",
-			"DOMAIN,dns10.quad9.net,REJECT",
-			"DOMAIN,mozilla.cloudflare-dns.com,REJECT",
 			"DOMAIN-SUFFIX,.mm,DIRECT",
 			"DOMAIN-SUFFIX,telegram.org,DIRECT",
 			"DOMAIN,t.me,DIRECT",
