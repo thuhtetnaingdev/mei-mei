@@ -14,8 +14,9 @@ type ClashSetting struct {
 	AutoTimeout         int       `json:"autoTimeout" gorm:"default:2000"`
 	AutoMaxFailed       int       `json:"autoMaxFailed" gorm:"default:1"`
 	FallbackMode        string    `json:"fallbackMode" gorm:"default:nodes"`
-	FallbackInterval    int       `json:"fallbackInterval" gorm:"default:10"`
-	FallbackCount       int       `json:"fallbackCount" gorm:"default:10"`
+	FallbackInterval       int       `json:"fallbackInterval" gorm:"default:10"`
+	FallbackNodeInterval   int       `json:"fallbackNodeInterval" gorm:"default:300"`
+	FallbackCount          int       `json:"fallbackCount" gorm:"default:10"`
 	FallbackTolerance   int       `json:"fallbackTolerance" gorm:"default:50"`
 	FallbackTimeout     int       `json:"fallbackTimeout" gorm:"default:2000"`
 	FallbackMaxFailed   int       `json:"fallbackMaxFailed" gorm:"default:1"`

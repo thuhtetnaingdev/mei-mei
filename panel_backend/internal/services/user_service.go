@@ -65,8 +65,9 @@ type UpdateClashSettingInput struct {
 	AutoTimeout         *int    `json:"autoTimeout"`
 	AutoMaxFailed       *int    `json:"autoMaxFailed"`
 	FallbackMode        *string `json:"fallbackMode"`
-	FallbackInterval    *int    `json:"fallbackInterval"`
-	FallbackCount       *int    `json:"fallbackCount"`
+	FallbackInterval       *int    `json:"fallbackInterval"`
+	FallbackNodeInterval   *int    `json:"fallbackNodeInterval"`
+	FallbackCount          *int    `json:"fallbackCount"`
 	FallbackTolerance   *int    `json:"fallbackTolerance"`
 	FallbackTimeout     *int    `json:"fallbackTimeout"`
 	FallbackMaxFailed   *int    `json:"fallbackMaxFailed"`
@@ -568,10 +569,13 @@ func (s *UserService) Update(id string, input UpdateUserInput) (*models.User, er
 			if input.ClashSetting.FallbackMode != nil {
 				cs.FallbackMode = *input.ClashSetting.FallbackMode
 			}
-			if input.ClashSetting.FallbackInterval != nil {
-				cs.FallbackInterval = *input.ClashSetting.FallbackInterval
-			}
-			if input.ClashSetting.FallbackCount != nil {
+		if input.ClashSetting.FallbackInterval != nil {
+			cs.FallbackInterval = *input.ClashSetting.FallbackInterval
+		}
+		if input.ClashSetting.FallbackNodeInterval != nil {
+			cs.FallbackNodeInterval = *input.ClashSetting.FallbackNodeInterval
+		}
+		if input.ClashSetting.FallbackCount != nil {
 				cs.FallbackCount = *input.ClashSetting.FallbackCount
 			}
 			if input.ClashSetting.FallbackTolerance != nil {

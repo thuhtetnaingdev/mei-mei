@@ -64,6 +64,7 @@ type UserFormState = {
   clashNodeMode: string;
   clashFallbackMode: string;
   clashFallbackInterval: number;
+  clashFallbackNodeInterval: number;
   clashFallbackCount: number;
   clashFallbackTolerance: number;
   clashFallbackTimeout: number;
@@ -90,6 +91,7 @@ const defaultFormState: UserFormState = {
   clashNodeMode: "sub_integration",
   clashFallbackMode: "nodes",
   clashFallbackInterval: 10,
+  clashFallbackNodeInterval: 300,
   clashFallbackCount: 10,
   clashFallbackTolerance: 50,
   clashFallbackTimeout: 2000,
@@ -569,6 +571,7 @@ export function UsersPage() {
               fallback: form.clashFallback,
               fallbackCount: form.clashFallbackCount,
               fallbackInterval: form.clashFallbackInterval,
+              fallbackNodeInterval: form.clashFallbackNodeInterval,
               fallbackTolerance: form.clashFallbackTolerance,
               fallbackTimeout: form.clashFallbackTimeout,
               fallbackMaxFailed: form.clashFallbackMaxFailed,
@@ -586,6 +589,7 @@ export function UsersPage() {
               fallback: form.clashFallback,
               fallbackCount: form.clashFallbackCount,
               fallbackInterval: form.clashFallbackInterval,
+              fallbackNodeInterval: form.clashFallbackNodeInterval,
               fallbackTolerance: form.clashFallbackTolerance,
               fallbackTimeout: form.clashFallbackTimeout,
               fallbackMaxFailed: form.clashFallbackMaxFailed,
@@ -696,6 +700,7 @@ export function UsersPage() {
         clashNodeMode: cs.nodeMode ?? "sub_integration",
         clashFallbackMode: cs.fallbackMode ?? "nodes",
         clashFallbackInterval: cs.fallbackInterval ?? 10,
+        clashFallbackNodeInterval: cs.fallbackNodeInterval ?? 300,
         clashFallbackCount: cs.fallbackCount ?? 10,
         clashFallbackTolerance: cs.fallbackTolerance ?? 50,
         clashFallbackTimeout: cs.fallbackTimeout ?? 2000,
@@ -1618,7 +1623,7 @@ export function UsersPage() {
                     </label>
                   )}
 
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-4 gap-3">
                     <label className="block">
                       <span className="mb-1.5 block text-xs font-medium text-slate-400">Count</span>
                       <input
@@ -1627,6 +1632,18 @@ export function UsersPage() {
                         disabled={!form.clashFallback}
                         value={form.clashFallbackCount}
                         onChange={(event) => setForm((current) => ({ ...current, clashFallbackCount: Number(event.target.value) || 1 }))}
+                        className="input-shell w-full disabled:cursor-not-allowed disabled:opacity-40"
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-medium text-slate-400">FB Node Interval</span>
+                      <input
+                        type="number"
+                        min={1}
+                        disabled={!form.clashFallback}
+                        value={form.clashFallbackNodeInterval}
+                        onChange={(event) => setForm((current) => ({ ...current, clashFallbackNodeInterval: Number(event.target.value) || 1 }))}
                         className="input-shell w-full disabled:cursor-not-allowed disabled:opacity-40"
                       />
                     </label>

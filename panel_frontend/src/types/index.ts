@@ -13,6 +13,7 @@ export interface ClashSetting {
   autoMaxFailed: number;
   fallbackMode: string;
   fallbackInterval: number;
+  fallbackNodeInterval: number;
   fallbackCount: number;
   fallbackTolerance: number;
   fallbackTimeout: number;

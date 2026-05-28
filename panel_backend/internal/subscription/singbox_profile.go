@@ -522,6 +522,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 	autoTimeout := 2000
 	autoMaxFailed := 1
 	fbInterval := 10
+	fbNodeInterval := 300
 	fbCount := 10
 	fbTolerance := 50
 	fbTimeout := 2000
@@ -538,6 +539,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		autoTimeout = cs.AutoTimeout
 		autoMaxFailed = cs.AutoMaxFailed
 		fbInterval = cs.FallbackInterval
+		fbNodeInterval = cs.FallbackNodeInterval
 		fbCount = cs.FallbackCount
 		fbTolerance = cs.FallbackTolerance
 		fbTimeout = cs.FallbackTimeout
@@ -586,12 +588,12 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		if len(fbNames) > 0 {
 			proxyGroups = append(proxyGroups,
 				map[string]interface{}{
-					"name":      "Fallback-Nodes",
-					"type":      "url-test",
-					"proxies":   fbNames,
-					"url":       "http://www.gstatic.com/generate_204",
-					"interval":  fbInterval,
-					"tolerance": fbTolerance,
+				"name":      "Fallback-Nodes",
+				"type":      "url-test",
+				"proxies":   fbNames,
+				"url":       "http://www.gstatic.com/generate_204",
+				"interval":  fbNodeInterval,
+				"tolerance": fbTolerance,
 				},
 				map[string]interface{}{
 					"name":             "FALLBACK",
