@@ -69,6 +69,7 @@ type UserFormState = {
   clashFallbackTolerance: number;
   clashFallbackTimeout: number;
   clashFallbackMaxFailed: number;
+  clashFallbackLazy: boolean;
   clashFallback: boolean;
   clashAutoInterval: number;
   clashAutoTolerance: number;
@@ -96,6 +97,7 @@ const defaultFormState: UserFormState = {
   clashFallbackTolerance: 50,
   clashFallbackTimeout: 2000,
   clashFallbackMaxFailed: 1,
+  clashFallbackLazy: false,
   clashFallback: false,
   clashAutoInterval: 600,
   clashAutoTolerance: 50,
@@ -575,6 +577,7 @@ export function UsersPage() {
               fallbackTolerance: form.clashFallbackTolerance,
               fallbackTimeout: form.clashFallbackTimeout,
               fallbackMaxFailed: form.clashFallbackMaxFailed,
+              fallbackLazy: form.clashFallbackLazy,
               mieruEnabled: form.clashMieruEnabled,
             }
           : {
@@ -593,6 +596,7 @@ export function UsersPage() {
               fallbackTolerance: form.clashFallbackTolerance,
               fallbackTimeout: form.clashFallbackTimeout,
               fallbackMaxFailed: form.clashFallbackMaxFailed,
+              fallbackLazy: form.clashFallbackLazy,
               mieruEnabled: form.clashMieruEnabled,
             };
         await api.patch(`/users/${editingUserId}`, {
@@ -705,6 +709,7 @@ export function UsersPage() {
         clashFallbackTolerance: cs.fallbackTolerance ?? 50,
         clashFallbackTimeout: cs.fallbackTimeout ?? 2000,
         clashFallbackMaxFailed: cs.fallbackMaxFailed ?? 1,
+        clashFallbackLazy: cs.fallbackLazy ?? false,
         clashFallback: cs.fallback ?? false,
         clashMieruEnabled: cs.mieruEnabled ?? false,
         clashAutoInterval: cs.autoInterval ?? 600,
@@ -1698,6 +1703,17 @@ export function UsersPage() {
                       />
                     </label>
                   </div>
+
+                  <label className="flex items-center gap-3 text-sm font-semibold text-violet-200">
+                    <input
+                      type="checkbox"
+                      checked={form.clashFallbackLazy}
+                      disabled={!form.clashFallback}
+                      onChange={(event) => setForm((current) => ({ ...current, clashFallbackLazy: event.target.checked }))}
+                      className="h-4 w-4 rounded border-white/20 bg-transparent disabled:cursor-not-allowed disabled:opacity-40"
+                    />
+                    Lazy
+                  </label>
 
                   <label className="flex items-center gap-3 text-sm font-semibold text-violet-200">
                     <input

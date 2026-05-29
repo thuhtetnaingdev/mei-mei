@@ -71,6 +71,7 @@ type UpdateClashSettingInput struct {
 	FallbackTolerance   *int    `json:"fallbackTolerance"`
 	FallbackTimeout     *int    `json:"fallbackTimeout"`
 	FallbackMaxFailed   *int    `json:"fallbackMaxFailed"`
+	FallbackLazy        *bool   `json:"fallbackLazy"`
 	MieruEnabled        *bool   `json:"mieruEnabled"`
 }
 
@@ -584,10 +585,13 @@ func (s *UserService) Update(id string, input UpdateUserInput) (*models.User, er
 			if input.ClashSetting.FallbackTimeout != nil {
 				cs.FallbackTimeout = *input.ClashSetting.FallbackTimeout
 			}
-			if input.ClashSetting.FallbackMaxFailed != nil {
-				cs.FallbackMaxFailed = *input.ClashSetting.FallbackMaxFailed
-			}
-			if input.ClashSetting.MieruEnabled != nil {
+		if input.ClashSetting.FallbackMaxFailed != nil {
+			cs.FallbackMaxFailed = *input.ClashSetting.FallbackMaxFailed
+		}
+		if input.ClashSetting.FallbackLazy != nil {
+			cs.FallbackLazy = *input.ClashSetting.FallbackLazy
+		}
+		if input.ClashSetting.MieruEnabled != nil {
 				cs.MieruEnabled = *input.ClashSetting.MieruEnabled
 			}
 			if err := tx.Save(&cs).Error; err != nil {

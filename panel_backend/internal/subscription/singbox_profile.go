@@ -527,6 +527,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 	fbTolerance := 50
 	fbTimeout := 2000
 	fbMaxFailed := 1
+	fbLazy := false
 
 	if user.ClashSetting != nil {
 		cs := user.ClashSetting
@@ -544,6 +545,7 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 		fbTolerance = cs.FallbackTolerance
 		fbTimeout = cs.FallbackTimeout
 		fbMaxFailed = cs.FallbackMaxFailed
+		fbLazy = cs.FallbackLazy
 	}
 
 	if autoType == "" {
@@ -595,15 +597,16 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 				"interval":  fbNodeInterval,
 				"tolerance": fbTolerance,
 				},
-				map[string]interface{}{
-					"name":             "FALLBACK",
-					"type":             "fallback",
-					"proxies":          []string{"AUTO", "Fallback-Nodes"},
-					"url":              "http://www.gstatic.com/generate_204",
-					"interval":         fbInterval,
-					"timeout":          fbTimeout,
-					"max-failed-times": fbMaxFailed,
-				},
+			map[string]interface{}{
+				"name":             "FALLBACK",
+				"type":             "fallback",
+				"proxies":          []string{"AUTO", "Fallback-Nodes"},
+				"url":              "http://www.gstatic.com/generate_204",
+				"interval":         fbInterval,
+				"timeout":          fbTimeout,
+				"max-failed-times": fbMaxFailed,
+				"lazy":             fbLazy,
+			},
 			)
 		}
 	}

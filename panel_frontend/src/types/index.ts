@@ -18,6 +18,7 @@ export interface ClashSetting {
   fallbackTolerance: number;
   fallbackTimeout: number;
   fallbackMaxFailed: number;
+  fallbackLazy: boolean;
   mieruEnabled: boolean;
 }
 

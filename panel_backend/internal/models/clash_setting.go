@@ -20,6 +20,7 @@ type ClashSetting struct {
 	FallbackTolerance   int       `json:"fallbackTolerance" gorm:"default:50"`
 	FallbackTimeout     int       `json:"fallbackTimeout" gorm:"default:2000"`
 	FallbackMaxFailed   int       `json:"fallbackMaxFailed" gorm:"default:1"`
+	FallbackLazy        bool      `json:"fallbackLazy"`
 	MieruEnabled        bool      `json:"mieruEnabled"`
 	CreatedAt           time.Time `json:"createdAt"`
 	UpdatedAt           time.Time `json:"updatedAt"`
