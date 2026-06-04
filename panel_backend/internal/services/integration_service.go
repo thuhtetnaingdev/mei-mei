@@ -172,6 +172,27 @@ func (s *IntegrationService) ReplaceBatch(id, testRunID string, working []map[st
 }
 
 func (s *IntegrationService) CompleteTest(id, testRunID string, workingCount, totalCount int, status string, errorMsg string) error {
+	var integ models.SubscriptionIntegration
+	if err := s.db.Where("id = ? AND test_run_id = ?", id, testRunID).First(&integ).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return fmt.Errorf("integration %s not found or testRunID mismatch", id)
+		}
+		return err
+	}
+
+	var trimmedResult string
+	if integ.Result != "" {
+		var parsed map[string]any
+		if json.Unmarshal([]byte(integ.Result), &parsed) == nil {
+			if working, ok := parsed["working"].([]any); ok && len(working) > workingCount {
+				parsed["working"] = working[:workingCount]
+				if b, err := json.Marshal(parsed); err == nil {
+					trimmedResult = string(b)
+				}
+			}
+		}
+	}
+
 	now := time.Now()
 	intervalHours := 1
 	nextTestAt := now.Add(time.Duration(intervalHours) * time.Hour)
@@ -183,6 +204,9 @@ func (s *IntegrationService) CompleteTest(id, testRunID string, workingCount, to
 		"error_message":          errorMsg,
 		"last_test_completed_at": now,
 		"next_test_at":           nextTestAt,
+	}
+	if trimmedResult != "" {
+		updates["result"] = trimmedResult
 	}
 
 	result := s.db.Model(&models.SubscriptionIntegration{}).Where(
