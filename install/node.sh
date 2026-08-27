@@ -67,7 +67,7 @@ install_managed_singbox() {
   local singbox_asset_name
   local singbox_download_url
   local singbox_extract_dir
-  local singbox_folder
+  local singbox_binary
 
   singbox_asset_name="singbox-v2ray-api-linux-${asset_arch}.tar.gz"
   singbox_download_url="$(release_asset_url "${singbox_asset_name}")"
@@ -77,13 +77,17 @@ install_managed_singbox() {
   fi
 
   singbox_extract_dir="${tmp_dir}/singbox-${asset_arch}"
-  singbox_folder="${singbox_asset_name%.tar.gz}"
   mkdir -p "${singbox_extract_dir}"
 
   echo "installing managed sing-box binary from release asset"
   curl -fsSL "$singbox_download_url" -o "${tmp_dir}/${singbox_asset_name}"
   tar -xzf "${tmp_dir}/${singbox_asset_name}" -C "${singbox_extract_dir}"
-  sudo install -m 0755 "${singbox_extract_dir}/${singbox_folder}/sing-box" /usr/bin/sing-box
+  singbox_binary="$(find "${singbox_extract_dir}" -type f -name sing-box | head -n1)"
+  if [[ -z "$singbox_binary" ]]; then
+    echo "sing-box binary not found inside ${singbox_asset_name}" >&2
+    exit 1
+  fi
+  sudo install -m 0755 "$singbox_binary" /usr/bin/sing-box
 }
 
 ensure_compatible_singbox() {

@@ -70,16 +70,22 @@ jobs:
         run: |
           curl -L -o /tmp/singbox-amd64.tar.gz \
             https://github.com/thuhtetnaingdev/mei-mei/releases/download/v0.5.10/singbox-v2ray-api-linux-amd64.tar.gz
-          mkdir -p dist/singbox-v2ray-api-linux-amd64
-          tar -C dist/singbox-v2ray-api-linux-amd64 -xzf /tmp/singbox-amd64.tar.gz
+          rm -rf /tmp/singbox-amd64-extract
+          mkdir -p /tmp/singbox-amd64-extract dist/singbox-v2ray-api-linux-amd64
+          tar -C /tmp/singbox-amd64-extract -xzf /tmp/singbox-amd64.tar.gz
+          find /tmp/singbox-amd64-extract -type f -name sing-box -exec install -m 0755 {} dist/singbox-v2ray-api-linux-amd64/sing-box \;
+          test -x dist/singbox-v2ray-api-linux-amd64/sing-box
           tar -C dist -czf dist/singbox-v2ray-api-linux-amd64.tar.gz singbox-v2ray-api-linux-amd64
 
       - name: Download sing-box v2ray api linux arm64
         run: |
           curl -L -o /tmp/singbox-arm64.tar.gz \
             https://github.com/thuhtetnaingdev/mei-mei/releases/download/v0.5.10/singbox-v2ray-api-linux-arm64.tar.gz
-          mkdir -p dist/singbox-v2ray-api-linux-arm64
-          tar -C dist/singbox-v2ray-api-linux-arm64 -xzf /tmp/singbox-arm64.tar.gz
+          rm -rf /tmp/singbox-arm64-extract
+          mkdir -p /tmp/singbox-arm64-extract dist/singbox-v2ray-api-linux-arm64
+          tar -C /tmp/singbox-arm64-extract -xzf /tmp/singbox-arm64.tar.gz
+          find /tmp/singbox-arm64-extract -type f -name sing-box -exec install -m 0755 {} dist/singbox-v2ray-api-linux-arm64/sing-box \;
+          test -x dist/singbox-v2ray-api-linux-arm64/sing-box
           tar -C dist -czf dist/singbox-v2ray-api-linux-arm64.tar.gz singbox-v2ray-api-linux-arm64
 
       - name: Build proxy linux amd64
