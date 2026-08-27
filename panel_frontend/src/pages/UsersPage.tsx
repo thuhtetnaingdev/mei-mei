@@ -56,6 +56,7 @@ type UserFormState = {
   email: string;
   enabled: boolean;
   isTesting: boolean;
+  premium: boolean;
   subIntegration: boolean;
   notes: string;
   initialBandwidthGb: number;
@@ -84,6 +85,7 @@ const defaultFormState: UserFormState = {
   email: "",
   enabled: true,
   isTesting: false,
+  premium: false,
   subIntegration: true,
   notes: "",
   initialBandwidthGb: 100,
@@ -603,6 +605,7 @@ export function UsersPage() {
           email: form.email,
           enabled: form.enabled,
           isTesting: form.isTesting,
+          premium: form.premium,
           subIntegration: form.subIntegration,
           notes: form.notes,
           clashSetting: cs
@@ -618,6 +621,7 @@ export function UsersPage() {
           email: form.email,
           enabled: form.enabled,
           isTesting: form.isTesting,
+          premium: form.premium,
           subIntegration: form.subIntegration,
           notes: form.notes,
           bandwidthAllocations: !form.isTesting && form.initialBandwidthGb > 0 ? [
@@ -696,6 +700,7 @@ export function UsersPage() {
         email: fresh.email,
         enabled: fresh.enabled,
         isTesting: fresh.isTesting,
+        premium: fresh.premium,
         subIntegration: fresh.subIntegration,
         notes: fresh.notes ?? "",
         initialBandwidthGb: 0,
@@ -1494,6 +1499,16 @@ export function UsersPage() {
                   Testing user
                 </label>
 
+                <label className="flex items-center gap-3 rounded-2xl border border-violet-300/15 bg-violet-300/[0.06] px-4 py-3 text-sm text-violet-100">
+                  <input
+                    type="checkbox"
+                    checked={form.premium}
+                    onChange={(event) => setForm((current) => ({ ...current, premium: event.target.checked }))}
+                    className="h-4 w-4 rounded border-white/20 bg-transparent"
+                  />
+                  Premium user
+                </label>
+
                 <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
                   <input
                     type="checkbox"
@@ -2002,6 +2017,16 @@ export function UsersPage() {
                   className="h-4 w-4 rounded border-white/20 bg-transparent"
                 />
                 Testing user
+              </label>
+
+              <label className="flex items-center gap-3 rounded-2xl border border-violet-300/15 bg-violet-300/[0.06] px-4 py-3 text-sm text-violet-100">
+                <input
+                  type="checkbox"
+                  checked={form.premium}
+                  onChange={(event) => setForm((current) => ({ ...current, premium: event.target.checked }))}
+                  className="h-4 w-4 rounded border-white/20 bg-transparent"
+                />
+                Premium user
               </label>
 
               <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-200">

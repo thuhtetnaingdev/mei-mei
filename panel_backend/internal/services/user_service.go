@@ -48,6 +48,7 @@ type CreateUserInput struct {
 	Email                string                         `json:"email" binding:"required,email"`
 	Enabled              *bool                          `json:"enabled"`
 	IsTesting            *bool                          `json:"isTesting"`
+	Premium              *bool                          `json:"premium"`
 	SubIntegration       *bool                          `json:"subIntegration"`
 	ExpiresAt            *time.Time                     `json:"expiresAt"`
 	BandwidthLimitGB     int64                          `json:"bandwidthLimitGb"`
@@ -79,6 +80,7 @@ type UpdateUserInput struct {
 	Email          *string                 `json:"email"`
 	Enabled        *bool                   `json:"enabled"`
 	IsTesting      *bool                   `json:"isTesting"`
+	Premium        *bool                   `json:"premium"`
 	SubIntegration *bool                   `json:"subIntegration"`
 	Notes          *string                 `json:"notes"`
 	ClashSetting   *UpdateClashSettingInput `json:"clashSetting"`
@@ -197,11 +199,17 @@ func (s *UserService) Create(input CreateUserInput) (*models.User, error) {
 		subIntegration = *input.SubIntegration
 	}
 
+	premium := false
+	if input.Premium != nil {
+		premium = *input.Premium
+	}
+
 	user := models.User{
 		UUID:           uuid.NewString(),
 		Email:          input.Email,
 		Enabled:        enabled,
 		IsTesting:      isTesting,
+		Premium:        premium,
 		SubIntegration: subIntegration,
 		Notes:          input.Notes,
 	}
@@ -531,6 +539,9 @@ func (s *UserService) Update(id string, input UpdateUserInput) (*models.User, er
 		}
 		if input.IsTesting != nil {
 			user.IsTesting = *input.IsTesting
+		}
+		if input.Premium != nil {
+			user.Premium = *input.Premium
 		}
 		if input.SubIntegration != nil {
 			user.SubIntegration = *input.SubIntegration

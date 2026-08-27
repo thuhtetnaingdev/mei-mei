@@ -1019,6 +1019,14 @@ func (h *Handler) updateNode(c *gin.Context) {
 		return
 	}
 
+	premiumFlipped := false
+	if input.Premium != nil {
+		var prev models.Node
+		if err := h.nodeService.GetDB().First(&prev, "id = ?", c.Param("id")).Error; err == nil {
+			premiumFlipped = *input.Premium != prev.Premium
+		}
+	}
+
 	node, err := h.nodeService.Update(c.Param("id"), input)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1028,6 +1036,10 @@ func (h *Handler) updateNode(c *gin.Context) {
 
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
+	}
+
+	if premiumFlipped {
+		h.syncActiveUsersBestEffort()
 	}
 
 	c.JSON(http.StatusOK, node)

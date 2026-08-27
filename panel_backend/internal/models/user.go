@@ -8,6 +8,7 @@ type User struct {
 	Email                string                    `json:"email" gorm:"uniqueIndex;not null"`
 	Enabled              bool                      `json:"enabled" gorm:"default:true"`
 	IsTesting            bool                      `json:"isTesting" gorm:"default:false"`
+	Premium              bool                      `json:"premium" gorm:"default:false"`
 	SubIntegration       bool                      `json:"subIntegration" gorm:"default:true"`
 	ClashSettingID       uint                      `json:"clashSettingId"`
 	ClashSetting         *ClashSetting             `json:"clashSetting" gorm:"foreignKey:ClashSettingID;constraint:OnDelete:CASCADE"`

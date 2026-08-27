@@ -28,6 +28,7 @@ export interface User {
   email: string;
   enabled: boolean;
   isTesting: boolean;
+  premium: boolean;
   subIntegration: boolean;
   clashSetting?: ClashSetting;
   expiresAt?: string | null;
@@ -115,6 +116,7 @@ export interface Node {
   baseUrl: string;
   enabled: boolean;
   isTestable: boolean;
+  premium: boolean;
   location: string;
   publicHost: string;
   expiresAt?: string | null;

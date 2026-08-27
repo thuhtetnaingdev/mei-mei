@@ -354,3 +354,176 @@ func TestGenerateNodeLinksFiltersTestingUsersToTestableNodes(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateNodeLinksPartitionsNodesByTier(t *testing.T) {
+	premiumNode := models.Node{Name: "premium-node", PublicHost: "premium.example.com", Enabled: true, Premium: true}
+	regularNode := models.Node{Name: "regular-node", PublicHost: "regular.example.com", Enabled: true}
+	nodes := []models.Node{premiumNode, regularNode}
+
+	regularUser := models.User{ID: 1, UUID: "u1", Email: "regular@example.com", Enabled: true}
+	premiumUser := models.User{ID: 2, UUID: "u2", Email: "premium@example.com", Enabled: true, Premium: true}
+
+	t.Run("regular user receives only regular nodes", func(t *testing.T) {
+		links := GenerateNodeLinks(regularUser, nodes, services.ProtocolSettings{})
+		if len(links) == 0 {
+			t.Fatal("expected regular user to receive node links")
+		}
+		for _, link := range links {
+			if link.NodeName != "regular-node" {
+				t.Fatalf("expected only regular-node links, got %q", link.NodeName)
+			}
+		}
+	})
+
+	t.Run("premium user receives only premium nodes", func(t *testing.T) {
+		links := GenerateNodeLinks(premiumUser, nodes, services.ProtocolSettings{})
+		if len(links) == 0 {
+			t.Fatal("expected premium user to receive node links")
+		}
+		for _, link := range links {
+			if link.NodeName != "premium-node" {
+				t.Fatalf("expected only premium-node links, got %q", link.NodeName)
+			}
+		}
+	})
+}
+
+func TestGenerateSingboxProfilePartitionsNodesByTier(t *testing.T) {
+	premiumNode := models.Node{Name: "premium-node", PublicHost: "premium.example.com", Enabled: true, Premium: true}
+	regularNode := models.Node{Name: "regular-node", PublicHost: "regular.example.com", Enabled: true}
+	nodes := []models.Node{premiumNode, regularNode}
+
+	checkTier := func(t *testing.T, user models.User, wantHost string) {
+		t.Helper()
+		payload, err := GenerateSingboxProfile(user, nodes, services.ProtocolSettings{}, nil)
+		if err != nil {
+			t.Fatalf("GenerateSingboxProfile() error = %v", err)
+		}
+
+		var profile struct {
+			Outbounds []map[string]interface{} `json:"outbounds"`
+		}
+		if err := json.Unmarshal(payload, &profile); err != nil {
+			t.Fatalf("json.Unmarshal() error = %v", err)
+		}
+
+		found := false
+		for _, outbound := range profile.Outbounds {
+			server, _ := outbound["server"].(string)
+			if server == "" {
+				continue
+			}
+			found = true
+			if server != wantHost {
+				t.Fatalf("unexpected outbound server %q for tier, want %q", server, wantHost)
+			}
+		}
+		if !found {
+			t.Fatal("expected at least one node outbound in sing-box profile")
+		}
+	}
+
+	t.Run("regular user receives only regular nodes", func(t *testing.T) {
+		checkTier(t, models.User{ID: 1, UUID: "u1", Email: "regular@example.com", Enabled: true}, "regular.example.com")
+	})
+
+	t.Run("premium user receives only premium nodes", func(t *testing.T) {
+		checkTier(t, models.User{ID: 2, UUID: "u2", Email: "premium@example.com", Enabled: true, Premium: true}, "premium.example.com")
+	})
+}
+
+func TestGenerateClashProfilePartitionsNodesByTier(t *testing.T) {
+	premiumNode := models.Node{Name: "premium-node", PublicHost: "premium.example.com", Enabled: true, Premium: true}
+	regularNode := models.Node{Name: "regular-node", PublicHost: "regular.example.com", Enabled: true}
+	nodes := []models.Node{premiumNode, regularNode}
+
+	checkTier := func(t *testing.T, user models.User, wantHost string) {
+		t.Helper()
+		payload, err := GenerateClashProfile(user, nodes, services.ProtocolSettings{}, nil)
+		if err != nil {
+			t.Fatalf("GenerateClashProfile() error = %v", err)
+		}
+
+		var profile struct {
+			Proxies []map[string]interface{} `yaml:"proxies"`
+		}
+		if err := yaml.Unmarshal(payload, &profile); err != nil {
+			t.Fatalf("yaml.Unmarshal() error = %v", err)
+		}
+
+		found := false
+		for _, proxy := range profile.Proxies {
+			server, _ := proxy["server"].(string)
+			if server == "" {
+				continue
+			}
+			found = true
+			if server != wantHost {
+				t.Fatalf("unexpected proxy server %q for tier, want %q", server, wantHost)
+			}
+		}
+		if !found {
+			t.Fatal("expected at least one node proxy in clash profile")
+		}
+	}
+
+	t.Run("regular user receives only regular nodes", func(t *testing.T) {
+		checkTier(t, models.User{ID: 1, UUID: "u1", Email: "regular@example.com", Enabled: true}, "regular.example.com")
+	})
+
+	t.Run("premium user receives only premium nodes", func(t *testing.T) {
+		checkTier(t, models.User{ID: 2, UUID: "u2", Email: "premium@example.com", Enabled: true, Premium: true}, "premium.example.com")
+	})
+}
+
+func TestTierFilterComposesWithExistingFilters(t *testing.T) {
+	nodes := []models.Node{
+		{Name: "premium-disabled", PublicHost: "premium-disabled.example.com", Enabled: false, Premium: true},
+		{Name: "premium-exhausted", PublicHost: "premium-exhausted.example.com", Enabled: true, Premium: true, BandwidthLimitGB: 1, BandwidthUsedBytes: 2 * 1024 * 1024 * 1024},
+		{Name: "premium-ok", PublicHost: "premium-ok.example.com", Enabled: true, Premium: true},
+		{Name: "regular-nontestable", PublicHost: "regular-nontestable.example.com", Enabled: true, IsTestable: false},
+		{Name: "regular-testable", PublicHost: "regular-testable.example.com", Enabled: true, IsTestable: true},
+	}
+
+	linkNames := func(links []NodeLink) []string {
+		names := make([]string, 0, len(links))
+		for _, link := range links {
+			names = append(names, link.NodeName)
+		}
+		return names
+	}
+
+	uniqueNames := func(names []string) []string {
+		seen := map[string]bool{}
+		unique := make([]string, 0, len(names))
+		for _, n := range names {
+			if !seen[n] {
+				seen[n] = true
+				unique = append(unique, n)
+			}
+		}
+		return unique
+	}
+
+	t.Run("premium user skips disabled and bandwidth-exceeded premium nodes", func(t *testing.T) {
+		links := GenerateNodeLinks(
+			models.User{ID: 1, UUID: "u1", Email: "p@example.com", Enabled: true, Premium: true},
+			nodes, services.ProtocolSettings{},
+		)
+		names := uniqueNames(linkNames(links))
+		if len(names) != 1 || names[0] != "premium-ok" {
+			t.Fatalf("expected only premium-ok, got %v", names)
+		}
+	})
+
+	t.Run("testing regular user is limited to testable regular nodes", func(t *testing.T) {
+		links := GenerateNodeLinks(
+			models.User{ID: 2, UUID: "u2", Email: "t@example.com", Enabled: true, IsTesting: true},
+			nodes, services.ProtocolSettings{},
+		)
+		names := uniqueNames(linkNames(links))
+		if len(names) != 1 || names[0] != "regular-testable" {
+			t.Fatalf("expected only regular-testable, got %v", names)
+		}
+	})
+}

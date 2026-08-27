@@ -30,6 +30,7 @@ type Node struct {
 	ProtocolToken          string     `json:"-" gorm:"not null"`
 	Enabled                bool       `json:"enabled" gorm:"default:true"`
 	IsTestable             bool       `json:"isTestable" gorm:"default:false"`
+	Premium                bool       `json:"premium" gorm:"default:false"`
 	HealthStatus           string     `json:"healthStatus" gorm:"default:unknown"`
 	SyncVerificationStatus string     `json:"syncVerificationStatus" gorm:"default:unknown"`
 	SyncVerificationError  string     `json:"syncVerificationError"`

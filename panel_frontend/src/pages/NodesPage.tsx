@@ -43,6 +43,7 @@ const emptyBootstrapForm = {
   location: "",
   publicHost: "",
   isTestable: false,
+  premium: false,
   sshPort: "22",
   nodePort: "9090",
   singboxReloadCommand: "systemctl restart meimei-sing-box.service"
@@ -84,6 +85,7 @@ export function NodesPage() {
     location: "",
     publicHost: "",
     isTestable: false,
+    premium: false,
     minerId: "",
     bandwidthLimitGb: "0",
     expiresAt: ""
@@ -159,6 +161,7 @@ export function NodesPage() {
         ...form,
         minerId: Number(form.minerId),
         isTestable: form.isTestable,
+        premium: form.premium,
         sshPort: Number(form.sshPort),
         nodePort: Number(form.nodePort)
       });
@@ -208,6 +211,7 @@ export function NodesPage() {
       location: node.location ?? "",
       publicHost: node.publicHost ?? "",
       isTestable: node.isTestable ?? false,
+      premium: node.premium ?? false,
       minerId: node.minerId ? String(node.minerId) : "",
       bandwidthLimitGb: String(node.bandwidthLimitGb ?? 0),
       expiresAt: node.expiresAt ? node.expiresAt.slice(0, 16) : ""
@@ -220,6 +224,7 @@ export function NodesPage() {
       location: "",
       publicHost: "",
       isTestable: false,
+      premium: false,
       minerId: "",
       bandwidthLimitGb: "0",
       expiresAt: ""
@@ -236,6 +241,7 @@ export function NodesPage() {
       location: nodeEditForm.location,
       publicHost: nodeEditForm.publicHost,
       isTestable: nodeEditForm.isTestable,
+      premium: nodeEditForm.premium,
       minerId: Number(nodeEditForm.minerId),
       bandwidthLimitGb: Number(nodeEditForm.bandwidthLimitGb) || 0,
       expiresAt: nodeEditForm.expiresAt ? new Date(nodeEditForm.expiresAt).toISOString() : null
@@ -969,6 +975,12 @@ export function NodesPage() {
                                   Testable
                                 </span>
                               ) : null}
+                              {node.premium ? (
+                                <span className="inline-flex items-center gap-2 rounded-full border border-violet-300/15 bg-violet-300/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-violet-100">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-violet-300" />
+                                  Premium
+                                </span>
+                              ) : null}
                               <span className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${verificationTone}`}>
                                 <span className={`h-1.5 w-1.5 rounded-full ${verificationDotTone}`} />
                                 {formatStatusLabel(node.syncVerificationStatus)}
@@ -1144,6 +1156,16 @@ export function NodesPage() {
             Testable node
           </label>
 
+          <label className="flex items-center gap-3 rounded-2xl border border-violet-300/15 bg-violet-300/[0.06] px-4 py-3 text-sm text-violet-100">
+            <input
+              type="checkbox"
+              checked={form.premium}
+              onChange={(event) => setForm((current) => ({ ...current, premium: event.target.checked }))}
+              className="h-4 w-4 rounded border-white/20 bg-transparent"
+            />
+            Premium node
+          </label>
+
           <div className="flex flex-wrap justify-end gap-3">
             <button type="button" onClick={() => setCreateNodeDialogOpen(false)} className="btn-secondary">
               Cancel
@@ -1204,6 +1226,15 @@ export function NodesPage() {
               className="h-4 w-4 rounded border-white/20 bg-transparent"
             />
             Testable node
+          </label>
+          <label className="flex items-center gap-3 rounded-2xl border border-violet-300/15 bg-violet-300/[0.06] px-4 py-3 text-sm text-violet-100">
+            <input
+              type="checkbox"
+              checked={nodeEditForm.premium}
+              onChange={(event) => setNodeEditForm((current) => ({ ...current, premium: event.target.checked }))}
+              className="h-4 w-4 rounded border-white/20 bg-transparent"
+            />
+            Premium node
           </label>
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-slate-300">Bandwidth Limit (GB)</span>

@@ -73,6 +73,7 @@ type UpdateNodeInput struct {
 	BandwidthLimitGB *int64     `json:"bandwidthLimitGb"`
 	Enabled          *bool      `json:"enabled"`
 	IsTestable       *bool      `json:"isTestable"`
+	Premium          *bool      `json:"premium"`
 	MinerID          *uint      `json:"minerId"`
 }
 
@@ -359,6 +360,9 @@ func (s *NodeService) Update(id string, input UpdateNodeInput) (*models.Node, er
 	if input.IsTestable != nil {
 		node.IsTestable = *input.IsTestable
 	}
+	if input.Premium != nil {
+		node.Premium = *input.Premium
+	}
 	node.ExpiresAt = input.ExpiresAt
 
 	if err := s.db.Save(&node).Error; err != nil {
@@ -586,6 +590,9 @@ func (s *NodeService) syncNodeEnabledState(node *models.Node) error {
 func (s *NodeService) syncNode(node models.Node, users []models.User) (*nodeSyncVerificationResult, error) {
 	syncUsers := make([]SyncUser, 0, len(users))
 	for _, user := range users {
+		if user.Premium != node.Premium {
+			continue
+		}
 		if user.IsTesting && !node.IsTestable {
 			continue
 		}

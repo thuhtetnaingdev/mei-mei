@@ -164,3 +164,72 @@ func newTestNodeService(t *testing.T, statusFor func(*SyncPayloadWithLimits) nod
 	userService := NewUserService(conn)
 	return NewNodeService(conn, "shared-token", 5*time.Second, userService), conn
 }
+
+func TestSyncAllUsersFiltersUsersByNodeTier(t *testing.T) {
+	var capturedUsers []SyncUser
+	service, conn := newTestNodeService(t, func(captured *SyncPayloadWithLimits) nodeStatusResponse {
+		capturedUsers = captured.Users
+		return nodeStatusResponse{
+			Status:                 "ok",
+			LastAppliedConfigHash:  hashSyncPayload(*captured),
+			AppliedUserCount:       countEnabledSyncUsers(captured.Users),
+			SyncVerificationStatus: "applied",
+		}
+	})
+
+	users := []models.User{
+		{ID: 1, UUID: "regular-1", Email: "regular1@example.com", Enabled: true},
+		{ID: 2, UUID: "premium-1", Email: "premium1@example.com", Enabled: true, Premium: true},
+	}
+
+	var node models.Node
+	if err := conn.First(&node).Error; err != nil {
+		t.Fatalf("load node: %v", err)
+	}
+
+	syncedUUIDs := func() []string {
+		uuids := make([]string, 0, len(capturedUsers))
+		for _, u := range capturedUsers {
+			uuids = append(uuids, u.UUID)
+		}
+		return uuids
+	}
+
+	t.Run("regular node receives only regular users", func(t *testing.T) {
+		results, err := service.SyncAllUsers(users)
+		if err != nil {
+			t.Fatalf("SyncAllUsers() error = %v", err)
+		}
+		if got := results[0]["status"]; got != "success" {
+			t.Fatalf("unexpected sync status: got %v want success", got)
+		}
+		if got := results[0]["expectedUserCount"]; got != 1 {
+			t.Fatalf("unexpected expectedUserCount: got %v want 1", got)
+		}
+		uuids := syncedUUIDs()
+		if len(uuids) != 1 || uuids[0] != "regular-1" {
+			t.Fatalf("unexpected synced users: got %v want [regular-1]", uuids)
+		}
+	})
+
+	t.Run("premium node receives only premium users", func(t *testing.T) {
+		node.Premium = true
+		if err := conn.Save(&node).Error; err != nil {
+			t.Fatalf("save node: %v", err)
+		}
+		results, err := service.SyncAllUsers(users)
+		if err != nil {
+			t.Fatalf("SyncAllUsers() error = %v", err)
+		}
+		if got := results[0]["status"]; got != "success" {
+			t.Fatalf("unexpected sync status: got %v want success", got)
+		}
+		if got := results[0]["expectedUserCount"]; got != 1 {
+			t.Fatalf("unexpected expectedUserCount: got %v want 1", got)
+		}
+		uuids := syncedUUIDs()
+		if len(uuids) != 1 || uuids[0] != "premium-1" {
+			t.Fatalf("unexpected synced users: got %v want [premium-1]", uuids)
+		}
+	})
+}
