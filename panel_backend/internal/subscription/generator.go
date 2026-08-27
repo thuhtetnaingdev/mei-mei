@@ -34,7 +34,7 @@ func filterAvailableNodes(user models.User, nodes []models.Node) []models.Node {
 	}
 	available := make([]models.Node, 0, len(nodes))
 	for _, node := range nodes {
-		if user.Premium != node.Premium {
+		if !user.Premium && node.Premium {
 			continue
 		}
 		if user.IsTesting && !node.IsTestable {

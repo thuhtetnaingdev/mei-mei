@@ -195,7 +195,7 @@ func TestSyncAllUsersFiltersUsersByNodeTier(t *testing.T) {
 		return uuids
 	}
 
-	t.Run("regular node receives only regular users", func(t *testing.T) {
+	t.Run("regular node receives regular and premium users", func(t *testing.T) {
 		results, err := service.SyncAllUsers(users)
 		if err != nil {
 			t.Fatalf("SyncAllUsers() error = %v", err)
@@ -203,12 +203,12 @@ func TestSyncAllUsersFiltersUsersByNodeTier(t *testing.T) {
 		if got := results[0]["status"]; got != "success" {
 			t.Fatalf("unexpected sync status: got %v want success", got)
 		}
-		if got := results[0]["expectedUserCount"]; got != 1 {
-			t.Fatalf("unexpected expectedUserCount: got %v want 1", got)
+		if got := results[0]["expectedUserCount"]; got != 2 {
+			t.Fatalf("unexpected expectedUserCount: got %v want 2", got)
 		}
 		uuids := syncedUUIDs()
-		if len(uuids) != 1 || uuids[0] != "regular-1" {
-			t.Fatalf("unexpected synced users: got %v want [regular-1]", uuids)
+		if len(uuids) != 2 {
+			t.Fatalf("unexpected synced users: got %v want [regular-1 premium-1]", uuids)
 		}
 	})
 

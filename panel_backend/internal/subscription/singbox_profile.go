@@ -22,6 +22,9 @@ func GenerateClashProfile(user models.User, nodes []models.Node, settings servic
 
 func buildSingboxProfileConfig(user models.User, nodes []models.Node, settings services.ProtocolSettings, extraOutbounds []map[string]interface{}) map[string]interface{} {
 	availableNodes := filterAvailableNodes(user, nodes)
+	if user.Premium && len(user.SelectedNodeIDs) > 0 {
+		availableNodes = filterNodesToSelection(availableNodes, user.SelectedNodeIDs)
+	}
 	nodeTags := collectOutboundTags(user, availableNodes, settings)
 
 	extraTags := make([]string, 0, len(extraOutbounds))
@@ -773,6 +776,20 @@ func buildClashProfileConfig(user models.User, nodes []models.Node, settings ser
 			"h2-concise": true,
 		},
 	}
+}
+
+func filterNodesToSelection(nodes []models.Node, selectedIDs []uint) []models.Node {
+	selected := make(map[uint]bool, len(selectedIDs))
+	for _, id := range selectedIDs {
+		selected[id] = true
+	}
+	filtered := make([]models.Node, 0, len(nodes))
+	for _, node := range nodes {
+		if selected[node.ID] {
+			filtered = append(filtered, node)
+		}
+	}
+	return filtered
 }
 
 func collectOutboundTags(user models.User, nodes []models.Node, settings services.ProtocolSettings) []string {

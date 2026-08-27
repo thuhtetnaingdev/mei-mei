@@ -57,6 +57,7 @@ type UserFormState = {
   enabled: boolean;
   isTesting: boolean;
   premium: boolean;
+  selectedNodeIds: number[];
   subIntegration: boolean;
   notes: string;
   initialBandwidthGb: number;
@@ -86,6 +87,7 @@ const defaultFormState: UserFormState = {
   enabled: true,
   isTesting: false,
   premium: false,
+  selectedNodeIds: [],
   subIntegration: true,
   notes: "",
   initialBandwidthGb: 100,
@@ -606,6 +608,7 @@ export function UsersPage() {
           enabled: form.enabled,
           isTesting: form.isTesting,
           premium: form.premium,
+          selectedNodeIds: form.selectedNodeIds,
           subIntegration: form.subIntegration,
           notes: form.notes,
           clashSetting: cs
@@ -622,6 +625,7 @@ export function UsersPage() {
           enabled: form.enabled,
           isTesting: form.isTesting,
           premium: form.premium,
+          selectedNodeIds: form.selectedNodeIds,
           subIntegration: form.subIntegration,
           notes: form.notes,
           bandwidthAllocations: !form.isTesting && form.initialBandwidthGb > 0 ? [
@@ -701,6 +705,7 @@ export function UsersPage() {
         enabled: fresh.enabled,
         isTesting: fresh.isTesting,
         premium: fresh.premium,
+        selectedNodeIds: fresh.selectedNodeIds ?? [],
         subIntegration: fresh.subIntegration,
         notes: fresh.notes ?? "",
         initialBandwidthGb: 0,
@@ -1509,6 +1514,37 @@ export function UsersPage() {
                   Premium user
                 </label>
 
+                {form.premium && (
+                  <div className="rounded-2xl border border-violet-300/15 bg-violet-300/[0.04] p-4">
+                    <p className="mb-1 text-sm font-semibold text-slate-300">Node Selection (sing-box profile)</p>
+                    <p className="mb-3 text-xs text-slate-500">Selected nodes appear in this user's sing-box profile only. Leave empty to include all nodes. Base64 links and the clash profile always include all nodes.</p>
+                    <div className="max-h-48 space-y-1.5 overflow-y-auto pr-1">
+                      {nodes.length === 0 && <p className="text-xs text-slate-500">No nodes available yet.</p>}
+                      {nodes.map((node) => (
+                        <label key={node.id} className="flex items-center gap-2 text-sm text-slate-200">
+                          <input
+                            type="checkbox"
+                            checked={form.selectedNodeIds.includes(node.id)}
+                            onChange={(event) =>
+                              setForm((current) => ({
+                                ...current,
+                                selectedNodeIds: event.target.checked
+                                  ? [...current.selectedNodeIds, node.id]
+                                  : current.selectedNodeIds.filter((id) => id !== node.id)
+                              }))
+                            }
+                            className="h-4 w-4 rounded border-white/20 bg-transparent"
+                          />
+                          <span>{node.name}</span>
+                          {node.premium && (
+                            <span className="text-[10px] uppercase tracking-wider text-violet-300">Premium</span>
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
                   <input
                     type="checkbox"
@@ -2028,6 +2064,37 @@ export function UsersPage() {
                 />
                 Premium user
               </label>
+
+              {form.premium && (
+                <div className="rounded-2xl border border-violet-300/15 bg-violet-300/[0.04] p-4">
+                  <p className="mb-1 text-sm font-semibold text-slate-300">Node Selection (sing-box profile)</p>
+                  <p className="mb-3 text-xs text-slate-500">Selected nodes appear in this user's sing-box profile only. Leave empty to include all nodes. Base64 links and the clash profile always include all nodes.</p>
+                  <div className="max-h-48 space-y-1.5 overflow-y-auto pr-1">
+                    {nodes.length === 0 && <p className="text-xs text-slate-500">No nodes available yet.</p>}
+                    {nodes.map((node) => (
+                      <label key={node.id} className="flex items-center gap-2 text-sm text-slate-200">
+                        <input
+                          type="checkbox"
+                          checked={form.selectedNodeIds.includes(node.id)}
+                          onChange={(event) =>
+                            setForm((current) => ({
+                              ...current,
+                              selectedNodeIds: event.target.checked
+                                ? [...current.selectedNodeIds, node.id]
+                                : current.selectedNodeIds.filter((id) => id !== node.id)
+                            }))
+                          }
+                          className="h-4 w-4 rounded border-white/20 bg-transparent"
+                        />
+                        <span>{node.name}</span>
+                        {node.premium && (
+                          <span className="text-[10px] uppercase tracking-wider text-violet-300">Premium</span>
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
                 <input

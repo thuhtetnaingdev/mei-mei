@@ -53,6 +53,7 @@ type CreateUserInput struct {
 	ExpiresAt            *time.Time                     `json:"expiresAt"`
 	BandwidthLimitGB     int64                          `json:"bandwidthLimitGb"`
 	Notes                string                         `json:"notes"`
+	SelectedNodeIDs      *[]uint                        `json:"selectedNodeIds"`
 	BandwidthAllocations []UserBandwidthAllocationInput `json:"bandwidthAllocations"`
 }
 
@@ -77,13 +78,14 @@ type UpdateClashSettingInput struct {
 }
 
 type UpdateUserInput struct {
-	Email          *string                 `json:"email"`
-	Enabled        *bool                   `json:"enabled"`
-	IsTesting      *bool                   `json:"isTesting"`
-	Premium        *bool                   `json:"premium"`
-	SubIntegration *bool                   `json:"subIntegration"`
-	Notes          *string                 `json:"notes"`
-	ClashSetting   *UpdateClashSettingInput `json:"clashSetting"`
+	Email           *string                 `json:"email"`
+	Enabled         *bool                   `json:"enabled"`
+	IsTesting       *bool                   `json:"isTesting"`
+	Premium         *bool                   `json:"premium"`
+	SubIntegration  *bool                   `json:"subIntegration"`
+	Notes           *string                 `json:"notes"`
+	SelectedNodeIDs *[]uint                 `json:"selectedNodeIds"`
+	ClashSetting    *UpdateClashSettingInput `json:"clashSetting"`
 }
 
 // UserListOptions represents filtering and pagination options for user list queries
@@ -168,6 +170,60 @@ type allocationDistributionSnapshot struct {
 	ReservePoolPercent float64
 }
 
+func (s *UserService) replaceUserSelectedNodesTx(tx *gorm.DB, userID uint, nodeIDs []uint) error {
+	if err := tx.Where("user_id = ?", userID).Delete(&models.UserSelectedNode{}).Error; err != nil {
+		return err
+	}
+	unique := make([]uint, 0, len(nodeIDs))
+	seen := map[uint]bool{}
+	for _, id := range nodeIDs {
+		if id == 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		unique = append(unique, id)
+	}
+	if len(unique) == 0 {
+		return nil
+	}
+	var count int64
+	if err := tx.Model(&models.Node{}).Where("id IN ?", unique).Count(&count).Error; err != nil {
+		return err
+	}
+	if count != int64(len(unique)) {
+		return errors.New("one or more selected nodes do not exist")
+	}
+	for _, id := range unique {
+		if err := tx.Create(&models.UserSelectedNode{UserID: userID, NodeID: id}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *UserService) loadSelectedNodeIDs(users []*models.User) error {
+	if len(users) == 0 {
+		return nil
+	}
+	userIDs := make([]uint, 0, len(users))
+	index := make(map[uint]*models.User, len(users))
+	for _, u := range users {
+		userIDs = append(userIDs, u.ID)
+		index[u.ID] = u
+		u.SelectedNodeIDs = []uint{}
+	}
+	var rows []models.UserSelectedNode
+	if err := s.db.Where("user_id IN ?", userIDs).Find(&rows).Error; err != nil {
+		return err
+	}
+	for _, r := range rows {
+		if u, ok := index[r.UserID]; ok {
+			u.SelectedNodeIDs = append(u.SelectedNodeIDs, r.NodeID)
+		}
+	}
+	return nil
+}
+
 func NewUserService(db *gorm.DB) *UserService {
 	return &UserService{db: db}
 }
@@ -225,6 +281,12 @@ func (s *UserService) Create(input CreateUserInput) (*models.User, error) {
 		}
 		user.ClashSettingID = cs.ID
 
+		if user.Premium && input.SelectedNodeIDs != nil {
+			if err := s.replaceUserSelectedNodesTx(tx, user.ID, *input.SelectedNodeIDs); err != nil {
+				return err
+			}
+		}
+
 		allocations := normalizeAllocationInputs(input.BandwidthAllocations, input.BandwidthLimitGB, input.ExpiresAt)
 		if user.IsTesting {
 			allocations = nil
@@ -265,6 +327,11 @@ func (s *UserService) List() ([]models.User, error) {
 			s.lazyInitClashSetting(&users[index])
 			s.hydrateUserSummary(&users[index])
 		}
+		ptrs := make([]*models.User, len(users))
+		for i := range users {
+			ptrs[i] = &users[i]
+		}
+		_ = s.loadSelectedNodeIDs(ptrs)
 	}
 	return users, err
 }
@@ -405,6 +472,7 @@ func (s *UserService) GetByID(id string) (*models.User, error) {
 	}
 	s.lazyInitClashSetting(&user)
 	s.hydrateUserSummary(&user)
+	_ = s.loadSelectedNodeIDs([]*models.User{&user})
 	return &user, nil
 }
 
@@ -424,6 +492,7 @@ func (s *UserService) GetByUUID(uuid string) (*models.User, error) {
 	}
 	s.lazyInitClashSetting(&user)
 	s.hydrateUserSummary(&user)
+	_ = s.loadSelectedNodeIDs([]*models.User{&user})
 	return &user, nil
 }
 
@@ -520,6 +589,10 @@ func (s *UserService) Delete(id string) error {
 			return err
 		}
 
+		if err := tx.Where("user_id = ?", user.ID).Delete(&models.UserSelectedNode{}).Error; err != nil {
+			return err
+		}
+
 		return tx.Delete(&models.User{}, "id = ?", id).Error
 	})
 }
@@ -609,6 +682,16 @@ func (s *UserService) Update(id string, input UpdateUserInput) (*models.User, er
 				return err
 			}
 			user.ClashSettingID = cs.ID
+		}
+
+		if input.Premium != nil && !*input.Premium {
+			if err := tx.Where("user_id = ?", user.ID).Delete(&models.UserSelectedNode{}).Error; err != nil {
+				return err
+			}
+		} else if input.SelectedNodeIDs != nil && user.Premium {
+			if err := s.replaceUserSelectedNodesTx(tx, user.ID, *input.SelectedNodeIDs); err != nil {
+				return err
+			}
 		}
 
 		if err := tx.Save(&user).Error; err != nil {

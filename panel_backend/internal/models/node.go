@@ -44,6 +44,7 @@ type Node struct {
 	KeyMismatchDetectedAt  *time.Time `json:"keyMismatchDetectedAt"`
 	KeyMismatchAutoFixedAt *time.Time `json:"keyMismatchAutoFixedAt"`
 	SingboxVersion         string     `json:"singboxVersion"`
+	Selections             []UserSelectedNode `json:"-" gorm:"foreignKey:NodeID;constraint:OnDelete:CASCADE"`
 	CreatedAt              time.Time  `json:"createdAt"`
 	UpdatedAt              time.Time  `json:"updatedAt"`
 }

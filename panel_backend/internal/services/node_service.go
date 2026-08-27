@@ -402,6 +402,9 @@ func (s *NodeService) Uninstall(id string) error {
 }
 
 func (s *NodeService) deleteNodeRecord(id string) error {
+	if err := s.db.Where("node_id = ?", id).Delete(&models.UserSelectedNode{}).Error; err != nil {
+		return err
+	}
 	result := s.db.Delete(&models.Node{}, "id = ?", id)
 	if result.RowsAffected == 0 {
 		return gorm.ErrRecordNotFound
@@ -590,7 +593,7 @@ func (s *NodeService) syncNodeEnabledState(node *models.Node) error {
 func (s *NodeService) syncNode(node models.Node, users []models.User) (*nodeSyncVerificationResult, error) {
 	syncUsers := make([]SyncUser, 0, len(users))
 	for _, user := range users {
-		if user.Premium != node.Premium {
+		if !user.Premium && node.Premium {
 			continue
 		}
 		if user.IsTesting && !node.IsTestable {

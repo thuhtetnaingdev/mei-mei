@@ -21,6 +21,8 @@ type User struct {
 	UserType             string                    `json:"userType" gorm:"default:'unknown'"`
 	LastClassifiedAt     *time.Time                `json:"lastClassifiedAt"`
 	BandwidthAllocations []UserBandwidthAllocation `json:"bandwidthAllocations" gorm:"constraint:OnDelete:CASCADE;"`
+	SelectedNodes        []UserSelectedNode        `json:"-" gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
+	SelectedNodeIDs      []uint                    `json:"selectedNodeIds" gorm:"-"`
 	CreatedAt            time.Time                 `json:"createdAt"`
 	UpdatedAt            time.Time                 `json:"updatedAt"`
 }
@@ -94,4 +96,13 @@ type PublicUserResponse struct {
 	HiddifyImportURL     string  `json:"hiddifyImportUrl,omitempty"`
 	SingboxProfileURL    string  `json:"singboxProfileUrl,omitempty"`
 	ClashProfileURL      string  `json:"clashProfileUrl,omitempty"`
+}
+
+// UserSelectedNode associates a premium user with a node they selected.
+// Selections curate the sing-box profile only; node deletion cascades.
+type UserSelectedNode struct {
+	ID        uint      `json:"id" gorm:"primaryKey"`
+	UserID    uint      `json:"userId" gorm:"index;not null;uniqueIndex:idx_user_selected_node;constraint:OnDelete:CASCADE"`
+	NodeID    uint      `json:"nodeId" gorm:"index;not null;uniqueIndex:idx_user_selected_node;constraint:OnDelete:CASCADE"`
+	CreatedAt time.Time `json:"createdAt"`
 }

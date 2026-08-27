@@ -29,6 +29,7 @@ export interface User {
   enabled: boolean;
   isTesting: boolean;
   premium: boolean;
+  selectedNodeIds: number[];
   subIntegration: boolean;
   clashSetting?: ClashSetting;
   expiresAt?: string | null;

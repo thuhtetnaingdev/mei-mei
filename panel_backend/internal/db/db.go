@@ -27,6 +27,7 @@ func Connect(databasePath string) (*gorm.DB, error) {
 
 	if err := conn.AutoMigrate(
 		&models.User{},
+		&models.UserSelectedNode{},
 		&models.UserBandwidthAllocation{},
 		&models.UserBandwidthNodeUsage{},
 		&models.UserRecord{},
