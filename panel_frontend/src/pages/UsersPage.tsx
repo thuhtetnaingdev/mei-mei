@@ -112,6 +112,162 @@ const defaultFormState: UserFormState = {
   clashMieruEnabled: false,
 };
 
+const buildClashSettingPayload = (form: UserFormState) =>
+  form.clashNodeMode === "nodes"
+    ? {
+        nodeMode: form.clashNodeMode,
+        autoType: form.clashAutoType,
+        loadBalanceStrategy: form.clashLoadBalanceStrategy,
+        autoInterval: form.clashAutoInterval,
+        autoTolerance: form.clashAutoTolerance,
+        autoTimeout: form.clashAutoTimeout,
+        autoMaxFailed: form.clashAutoMaxFailed,
+        fallback: form.clashFallback,
+        fallbackCount: form.clashFallbackCount,
+        fallbackInterval: form.clashFallbackInterval,
+        fallbackNodeInterval: form.clashFallbackNodeInterval,
+        fallbackTolerance: form.clashFallbackTolerance,
+        fallbackTimeout: form.clashFallbackTimeout,
+        fallbackMaxFailed: form.clashFallbackMaxFailed,
+        fallbackLazy: form.clashFallbackLazy,
+        mieruEnabled: form.clashMieruEnabled,
+      }
+    : {
+        nodeMode: form.clashNodeMode,
+        fallbackMode: form.clashFallbackMode,
+        autoType: form.clashAutoType,
+        loadBalanceStrategy: form.clashLoadBalanceStrategy,
+        autoInterval: form.clashAutoInterval,
+        autoTolerance: form.clashAutoTolerance,
+        autoTimeout: form.clashAutoTimeout,
+        autoMaxFailed: form.clashAutoMaxFailed,
+        fallback: form.clashFallback,
+        fallbackCount: form.clashFallbackCount,
+        fallbackInterval: form.clashFallbackInterval,
+        fallbackNodeInterval: form.clashFallbackNodeInterval,
+        fallbackTolerance: form.clashFallbackTolerance,
+        fallbackTimeout: form.clashFallbackTimeout,
+        fallbackMaxFailed: form.clashFallbackMaxFailed,
+        fallbackLazy: form.clashFallbackLazy,
+        mieruEnabled: form.clashMieruEnabled,
+      };
+
+const SAMPLE_CLASH_NODES: { name: string; role: "primary" | "fallback" }[] = [
+  { name: "Node-1-Reality", role: "primary" },
+  { name: "Node-1-TUIC", role: "primary" },
+  { name: "Node-2-Hysteria2", role: "primary" },
+  { name: "Node-3-Shadowsocks", role: "primary" },
+  { name: "Node-4-Reality", role: "fallback" },
+  { name: "Node-4-Hysteria2", role: "fallback" },
+  { name: "Node-5-TUIC", role: "fallback" },
+];
+
+const SAMPLE_IMPORTED = ["Imported-1", "Imported-2"];
+const SAMPLE_MIERU = ["Mieru-Node-1", "Mieru-Node-2"];
+
+const renderSampleGroup = (group: Record<string, unknown>): string => {
+  const lines: string[] = [];
+  for (const [key, value] of Object.entries(group)) {
+    if (Array.isArray(value)) {
+      lines.push(`    ${key}:`);
+      for (const item of value) {
+        lines.push(`      - ${String(item)}`);
+      }
+    } else {
+      lines.push(`    ${key}: ${String(value)}`);
+    }
+  }
+  return lines.join("\n");
+};
+
+// Builds a sample proxy-groups YAML preview from the draft clash settings.
+// Mirrors the group logic of buildClashProfileConfig (panel_backend) with
+// placeholder member names — it never uses real node data.
+const buildClashSamplePreview = (form: UserFormState): string => {
+  const nodeNames = SAMPLE_CLASH_NODES.map((n) => n.name);
+  const primaryNames = SAMPLE_CLASH_NODES.filter((n) => n.role === "primary").map((n) => n.name);
+  const fallbackNames = SAMPLE_CLASH_NODES.filter((n) => n.role === "fallback").map((n) => n.name);
+  const mieruNames = form.clashMieruEnabled ? SAMPLE_MIERU : [];
+  const allNames = [...nodeNames, ...SAMPLE_IMPORTED, ...mieruNames];
+
+  // AUTO member list follows buildClashProfileConfig: node mode splits by role,
+  // fallback + fallbackMode decides node vs imported proxies.
+  let autoMembers: string[];
+  if (form.clashNodeMode === "nodes") {
+    autoMembers = primaryNames;
+  } else if (form.clashFallback && form.clashFallbackMode === "sub_integration") {
+    autoMembers = nodeNames;
+  } else if (form.clashFallback) {
+    autoMembers = SAMPLE_IMPORTED;
+  } else {
+    autoMembers = allNames;
+  }
+
+  // Fallback pool mirrors the fbNames selection, truncated to fallbackCount.
+  let fbMembers: string[];
+  if (form.clashNodeMode === "nodes") {
+    fbMembers = fallbackNames;
+  } else if (form.clashFallbackMode === "sub_integration") {
+    fbMembers = SAMPLE_IMPORTED;
+  } else {
+    fbMembers = nodeNames;
+  }
+  if (form.clashFallbackCount > 0) {
+    fbMembers = fbMembers.slice(0, form.clashFallbackCount);
+  }
+
+  const autoGroup: Record<string, unknown> = {
+    name: "AUTO",
+    type: form.clashAutoType,
+    proxies: autoMembers.length > 0 ? autoMembers : ["DIRECT"],
+    url: "http://www.gstatic.com/generate_204",
+    interval: form.clashAutoInterval,
+    timeout: form.clashAutoTimeout,
+    "max-failed-times": form.clashAutoMaxFailed,
+  };
+  if (form.clashAutoType === "url-test") {
+    autoGroup.tolerance = form.clashAutoTolerance;
+  }
+  if (form.clashAutoType === "load-balance") {
+    autoGroup.strategy = form.clashLoadBalanceStrategy;
+  }
+
+  const groups: Record<string, unknown>[] = [autoGroup];
+
+  if (form.clashFallback && fbMembers.length > 0) {
+    groups.push({
+      name: "Fallback-Nodes",
+      type: "url-test",
+      proxies: fbMembers,
+      url: "http://www.gstatic.com/generate_204",
+      interval: form.clashFallbackNodeInterval,
+      tolerance: form.clashFallbackTolerance,
+    });
+    groups.push({
+      name: "FALLBACK",
+      type: "fallback",
+      proxies: ["AUTO", "Fallback-Nodes"],
+      url: "http://www.gstatic.com/generate_204",
+      interval: form.clashFallbackInterval,
+      timeout: form.clashFallbackTimeout,
+      "max-failed-times": form.clashFallbackMaxFailed,
+      lazy: form.clashFallbackLazy,
+    });
+  }
+
+  groups.push({
+    name: "Proxy",
+    type: "select",
+    proxies: [...(form.clashFallback && fbMembers.length > 0 ? ["FALLBACK"] : []), "AUTO", "DIRECT", ...allNames],
+  });
+
+  const lines = ["proxy-groups:"];
+  for (const group of groups) {
+    lines.push(renderSampleGroup(group));
+  }
+  return lines.join("\n");
+};
+
 type AllocationFormState = {
   bandwidthGb: number;
   tokenAmount: number;
@@ -414,6 +570,8 @@ export function UsersPage() {
   const [allocationForm, setAllocationForm] = useState<AllocationFormState>(defaultAllocationForm);
   const [editingUserId, setEditingUserId] = useState<number | null>(null);
   const [userDialogOpen, setUserDialogOpen] = useState(false);
+  const [userDialogTab, setUserDialogTab] = useState<"config" | "clash" | "bandwidth">("config");
+  const clashSamplePreview = editingUserId ? buildClashSamplePreview(form) : "";
   const [reductionDialogOpen, setReductionDialogOpen] = useState(false);
   const [reductionTarget, setReductionTarget] = useState<User | null>(null);
   const [reductionAllocationTarget, setReductionAllocationTarget] = useState<UserBandwidthAllocation | null>(null);
@@ -536,6 +694,7 @@ export function UsersPage() {
     setAllocationForm(defaultAllocationForm);
     setEditingUserId(null);
     setFormError("");
+    setUserDialogTab("config");
     setUserDialogOpen(false);
   };
 
@@ -565,44 +724,7 @@ export function UsersPage() {
     try {
       setUserSaving(true);
       if (editingUserId) {
-        const cs = form.clashNodeMode === "nodes"
-          ? {
-              nodeMode: form.clashNodeMode,
-              autoType: form.clashAutoType,
-              loadBalanceStrategy: form.clashLoadBalanceStrategy,
-              autoInterval: form.clashAutoInterval,
-              autoTolerance: form.clashAutoTolerance,
-              autoTimeout: form.clashAutoTimeout,
-              autoMaxFailed: form.clashAutoMaxFailed,
-              fallback: form.clashFallback,
-              fallbackCount: form.clashFallbackCount,
-              fallbackInterval: form.clashFallbackInterval,
-              fallbackNodeInterval: form.clashFallbackNodeInterval,
-              fallbackTolerance: form.clashFallbackTolerance,
-              fallbackTimeout: form.clashFallbackTimeout,
-              fallbackMaxFailed: form.clashFallbackMaxFailed,
-              fallbackLazy: form.clashFallbackLazy,
-              mieruEnabled: form.clashMieruEnabled,
-            }
-          : {
-              nodeMode: form.clashNodeMode,
-              fallbackMode: form.clashFallbackMode,
-              autoType: form.clashAutoType,
-              loadBalanceStrategy: form.clashLoadBalanceStrategy,
-              autoInterval: form.clashAutoInterval,
-              autoTolerance: form.clashAutoTolerance,
-              autoTimeout: form.clashAutoTimeout,
-              autoMaxFailed: form.clashAutoMaxFailed,
-              fallback: form.clashFallback,
-              fallbackCount: form.clashFallbackCount,
-              fallbackInterval: form.clashFallbackInterval,
-              fallbackNodeInterval: form.clashFallbackNodeInterval,
-              fallbackTolerance: form.clashFallbackTolerance,
-              fallbackTimeout: form.clashFallbackTimeout,
-              fallbackMaxFailed: form.clashFallbackMaxFailed,
-              fallbackLazy: form.clashFallbackLazy,
-              mieruEnabled: form.clashMieruEnabled,
-            };
+        const cs = buildClashSettingPayload(form);
         await api.patch(`/users/${editingUserId}`, {
           email: form.email,
           enabled: form.enabled,
@@ -639,9 +761,9 @@ export function UsersPage() {
         setFormStatus("User created.");
       }
 
-      await syncNodes();
       await Promise.all([loadUsers(), loadTreasury()]);
       closeUserDialog();
+      void syncNodes().catch((err) => console.error("[node-sync]", err));
     } catch (error) {
       setFormError(extractApiError(error, "We could not save this user right now."));
     } finally {
@@ -695,6 +817,7 @@ export function UsersPage() {
   const startEdit = async (user: User) => {
     setEditLoading(true);
     setEditingUserId(user.id);
+    setUserDialogTab("config");
     setFormError("");
     try {
       const res = await api.get<User>(`/users/${user.id}`);
@@ -790,9 +913,9 @@ export function UsersPage() {
 
       const targetUser = users.find((user) => user.id === editingUserId);
       setFormStatus(`Added bandwidth to ${targetUser?.email ?? "user"}.`);
-      await syncNodes();
       await Promise.all([loadUsers(), loadTreasury()]);
       setAllocationForm(defaultAllocationForm);
+      void syncNodes().catch((err) => console.error("[node-sync]", err));
     } catch (error) {
       setFormError(extractApiError(error, "We could not add bandwidth right now."));
     } finally {
@@ -821,9 +944,9 @@ export function UsersPage() {
       setFormStatus(
         `${reductionForm.action === "increase" ? "Increased" : "Reduced"} bandwidth entry for ${reductionTarget.email}.`
       );
-      await syncNodes();
       await loadTreasury();
       closeReductionDialog();
+      void syncNodes().catch((err) => console.error("[node-sync]", err));
     } catch (error) {
       setFormError(extractApiError(error, "We could not adjust this bandwidth entry right now."));
     } finally {
@@ -855,8 +978,8 @@ export function UsersPage() {
       const updatedUser = response.data;
       setUsers((current) => current.map((user) => (user.id === updatedUser.id ? updatedUser : user)));
       setFormStatus(`Updated expiry for bandwidth entry on ${allocationEditTargetUser.email}.`);
-      await syncNodes();
       closeAllocationEditDialog();
+      void syncNodes().catch((err) => console.error("[node-sync]", err));
     } catch (error) {
       setFormError(extractApiError(error, "We could not update this entry right now."));
     } finally {
@@ -872,13 +995,13 @@ export function UsersPage() {
     try {
       setDeleteSaving(true);
       await api.delete(`/users/${deleteTarget.id}`);
-      await syncNodes();
       if (selectedAccess?.userId === deleteTarget.id) {
         closeAccessDialog();
       }
       setFormStatus("User deleted.");
       setDeleteTarget(null);
       await loadUsers();
+      void syncNodes().catch((err) => console.error("[node-sync]", err));
     } catch (error) {
       setFormError(extractApiError(error, "We could not delete this user right now."));
     } finally {
@@ -1439,7 +1562,7 @@ export function UsersPage() {
         title={editingUserId ? "Edit User" : "Add User"}
         description={
           editingUserId
-            ? "Update the user profile, add a new bandwidth package, and review bandwidth history from one modal."
+            ? "Edit identity and sync settings on the Config tab, clash profile settings on the Clash tab, and manage bandwidth packages on the Bandwidth tab."
             : "Create a new identity without leaving the users workspace."
         }
         hideActions
@@ -1457,7 +1580,38 @@ export function UsersPage() {
 
           {editingUserId ? (
             <div className="mt-4 space-y-4">
+              <div className="flex gap-1 rounded-2xl border border-white/10 bg-white/[0.03] p-1" role="tablist" aria-label="Edit user sections">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={userDialogTab === "config"}
+                  onClick={() => setUserDialogTab("config")}
+                  className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition-colors ${userDialogTab === "config" ? "bg-sky-500/20 text-sky-200" : "text-slate-400 hover:text-slate-200"}`}
+                >
+                  Config
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={userDialogTab === "clash"}
+                  onClick={() => setUserDialogTab("clash")}
+                  className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition-colors ${userDialogTab === "clash" ? "bg-sky-500/20 text-sky-200" : "text-slate-400 hover:text-slate-200"}`}
+                >
+                  Clash
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={userDialogTab === "bandwidth"}
+                  onClick={() => setUserDialogTab("bandwidth")}
+                  className={`flex-1 rounded-xl px-4 py-2 text-sm font-medium transition-colors ${userDialogTab === "bandwidth" ? "bg-sky-500/20 text-sky-200" : "text-slate-400 hover:text-slate-200"}`}
+                >
+                  Bandwidth
+                </button>
+              </div>
+
               <form className="panel-subtle space-y-4 p-4 sm:p-5" onSubmit={(event) => void submitUser(event)}>
+              <div className={userDialogTab === "config" ? "space-y-4" : "hidden"} role="tabpanel">
                 <div>
                   <p className="metric-kicker">Update User</p>
                   <p className="mt-2 text-sm text-slate-400">Edit identity details and sync state for this account.</p>
@@ -1555,6 +1709,29 @@ export function UsersPage() {
                   Sub Integration
                 </label>
 
+                <div className="flex flex-wrap justify-end gap-3">
+                  <button type="button" onClick={closeUserDialog} disabled={userSaving} className="btn-secondary disabled:cursor-not-allowed disabled:opacity-60">
+                    Close
+                  </button>
+                  <button type="submit" disabled={userSaving} className="btn-primary disabled:cursor-not-allowed disabled:opacity-70">
+                    {userSaving ? <LoadingSpinner /> : null}
+                    {userSubmitLabel}
+                  </button>
+                </div>
+
+                {form.isTesting ? (
+                  <div className="rounded-2xl border border-amber-300/20 bg-amber-300/[0.06] px-4 py-3 text-sm text-amber-100">
+                    Testing users skip credit funding and bandwidth package rules. They only sync to nodes marked testable.
+                  </div>
+                ) : null}
+              </div>
+
+              <div className={userDialogTab === "clash" ? "space-y-4" : "hidden"} role="tabpanel">
+                <div>
+                  <p className="metric-kicker">Clash Settings</p>
+                  <p className="mt-2 text-sm text-slate-400">Configure the clash profile groups and preview the generated proxy-groups.</p>
+                </div>
+
                 <div className="space-y-3 rounded-2xl border border-violet-300/10 bg-violet-300/[0.04] p-4">
                   <label className="block">
                     <span className="mb-1.5 block text-xs font-medium text-slate-400">Node Mode</span>
@@ -1567,7 +1744,7 @@ export function UsersPage() {
                       <option value="nodes">Nodes</option>
                     </select>
                     {!form.subIntegration && (
-                      <p className="mt-1 text-xs text-slate-500">Requires "Sub Integration" to be enabled above.</p>
+                      <p className="mt-1 text-xs text-slate-500">Requires "Sub Integration" to be enabled in the Config tab.</p>
                     )}
                   </label>
 
@@ -1659,8 +1836,8 @@ export function UsersPage() {
                   {(!form.enabled || (form.clashNodeMode !== "nodes" && !form.subIntegration)) && (
                     <p className="text-xs text-slate-500">
                       {form.clashNodeMode === "nodes"
-                        ? 'Requires "Enabled for node sync" to be on.'
-                        : 'Requires both "Enabled for node sync" and "Sub Integration" to be on.'}
+                        ? 'Requires "Enabled for node sync" to be on in the Config tab.'
+                        : 'Requires both "Enabled for node sync" and "Sub Integration" to be on in the Config tab.'}
                     </p>
                   )}
 
@@ -1777,15 +1954,25 @@ export function UsersPage() {
                     Mieru Protocol
                   </label>
                   {(!form.enabled || (form.clashNodeMode !== "nodes" && !form.subIntegration)) && (
-                    <p className="text-xs text-slate-500">Requires "Enabled for node sync" and "Sub Integration" to be on.</p>
+                    <p className="text-xs text-slate-500">Requires "Enabled for node sync" and "Sub Integration" to be on in the Config tab.</p>
                   )}
                 </div>
 
-                {form.isTesting ? (
-                  <div className="rounded-2xl border border-amber-300/20 bg-amber-300/[0.06] px-4 py-3 text-sm text-amber-100">
-                    Testing users skip credit funding and bandwidth package rules. They only sync to nodes marked testable.
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="text-xs font-medium text-slate-400">Sample config preview (proxy-groups)</span>
+                    <button
+                      type="button"
+                      onClick={() => void navigator.clipboard.writeText(clashSamplePreview)}
+                      className="text-xs text-sky-300 hover:text-sky-200"
+                    >
+                      Copy
+                    </button>
                   </div>
-                ) : null}
+                  <pre className="max-h-72 overflow-auto rounded-xl border border-white/10 bg-black/30 p-3 text-xs leading-relaxed text-emerald-200/90">
+                    {clashSamplePreview}
+                  </pre>
+                </div>
 
                 <div className="flex flex-wrap justify-end gap-3">
                   <button type="button" onClick={closeUserDialog} disabled={userSaving} className="btn-secondary disabled:cursor-not-allowed disabled:opacity-60">
@@ -1796,8 +1983,10 @@ export function UsersPage() {
                     {userSubmitLabel}
                   </button>
                 </div>
+              </div>
               </form>
 
+              <div className={userDialogTab === "bandwidth" ? "space-y-4" : "hidden"} role="tabpanel">
               {editingUser?.isTesting ? (
                 <div className="panel-subtle space-y-3 p-4 sm:p-5">
                   <div>
@@ -2008,6 +2197,7 @@ export function UsersPage() {
                     No bandwidth entries yet for this user.
                   </div>
                 )}
+              </div>
               </div>
             </div>
           ) : (
