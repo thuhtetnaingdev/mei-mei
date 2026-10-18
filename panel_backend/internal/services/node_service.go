@@ -2,6 +2,7 @@ package services
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -19,6 +20,8 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+var nodeStatusProbeTimeout = 3 * time.Second
 
 type NodeService struct {
 	db            *gorm.DB
@@ -310,9 +313,16 @@ func (s *NodeService) ListWithRuntimeStatus() ([]models.Node, error) {
 		return nil, err
 	}
 
+	var wg sync.WaitGroup
 	for index := range nodes {
-		s.refreshNodeRuntimeStatus(&nodes[index])
+		wg.Add(1)
+		go func(node *models.Node) {
+			defer wg.Done()
+			s.refreshNodeRuntimeStatus(node)
+		}(&nodes[index])
 	}
+
+	wg.Wait()
 
 	return nodes, nil
 }
@@ -685,8 +695,12 @@ type nodeStatusResponse struct {
 }
 
 func (s *NodeService) refreshNodeRuntimeStatus(node *models.Node) {
-	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/status", node.BaseURL), nil)
+	ctx, cancel := context.WithTimeout(context.Background(), nodeStatusProbeTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/status", node.BaseURL), nil)
 	if err != nil {
+		s.markNodeOffline(node)
 		return
 	}
 
@@ -744,8 +758,15 @@ func (s *NodeService) refreshNodeRuntimeStatus(node *models.Node) {
 }
 
 func (s *NodeService) markNodeOffline(node *models.Node) {
+	if node == nil {
+		return
+	}
+	if node.HealthStatus == "offline" {
+		return
+	}
+
 	node.HealthStatus = "offline"
-	_ = s.db.Model(node).Update("health_status", "offline").Error
+	_ = s.db.Model(&models.Node{}).Where("id = ?", node.ID).Update("health_status", "offline").Error
 }
 
 func (s *NodeService) verifyNodeSync(node models.Node, expectedConfigHash string, expectedUserCount int) (*nodeSyncVerificationResult, error) {

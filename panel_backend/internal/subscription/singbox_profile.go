@@ -6,6 +6,7 @@ import (
 	"net"
 	"panel_backend/internal/models"
 	"panel_backend/internal/services"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -866,8 +867,22 @@ func singboxToClashProxy(cfg map[string]interface{}, name string) map[string]int
 			"server":           server,
 			"port":             int(serverPort),
 			"uuid":             cfg["uuid"],
+			"alterId":          0,
+			"cipher":           "auto",
 			"udp":              true,
 			"skip-cert-verify": true,
+		}
+		if aid, ok := cfg["alter_id"].(float64); ok && aid >= 0 {
+			proxy["alterId"] = int(aid)
+		} else if aidStr, ok := cfg["alter_id"].(string); ok {
+			if n, err := strconv.Atoi(aidStr); err == nil && n >= 0 {
+				proxy["alterId"] = n
+			}
+		}
+		if cipher, ok := cfg["cipher"].(string); ok && cipher != "" {
+			proxy["cipher"] = cipher
+		} else if sec, ok := cfg["security"].(string); ok && sec != "" {
+			proxy["cipher"] = sec
 		}
 		if tls, ok := cfg["tls"].(map[string]interface{}); ok {
 			proxy["tls"] = true
