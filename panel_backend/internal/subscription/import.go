@@ -227,19 +227,43 @@ func parseVLESS(u *url.URL, raw, remark string) *ParsedProxy {
 	return p
 }
 
+// flexibleInt accepts integers encoded as JSON numbers or strings, which both
+// appear in vmess links produced by different subscription providers.
+type flexibleInt int
+
+func (n *flexibleInt) UnmarshalJSON(data []byte) error {
+	raw := strings.TrimSpace(string(data))
+	if raw == "null" || raw == `""` {
+		*n = 0
+		return nil
+	}
+	raw = strings.Trim(raw, `"`)
+	if raw == "" {
+		*n = 0
+		return nil
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return fmt.Errorf("invalid number %q", raw)
+	}
+	*n = flexibleInt(int(v))
+	return nil
+}
+
 func parseVMess(u *url.URL, raw, remark string) *ParsedProxy {
 	var vmessConfig struct {
-		Add  string `json:"add"`
-		Host string `json:"host"`
-		Port int    `json:"port"`
-		Ps   string `json:"ps"`
-		ID   string `json:"id"`
-		Aid  int    `json:"aid"`
-		Net  string `json:"net"`
-		Type string `json:"type"`
-		TLS  string `json:"tls"`
-		Path string `json:"path"`
-		Scy  string `json:"scy"`
+		Add  string      `json:"add"`
+		Host string      `json:"host"`
+		Sni  string      `json:"sni"`
+		Port flexibleInt `json:"port"`
+		Ps   string      `json:"ps"`
+		ID   string      `json:"id"`
+		Aid  flexibleInt `json:"aid"`
+		Net  string      `json:"net"`
+		Type string      `json:"type"`
+		TLS  string      `json:"tls"`
+		Path string      `json:"path"`
+		Scy  string      `json:"scy"`
 	}
 
 	rawConfig := raw
@@ -248,6 +272,10 @@ func parseVMess(u *url.URL, raw, remark string) *ParsedProxy {
 		rawConfig = string(decoded)
 	} else if decoded, err := base64.RawStdEncoding.DecodeString(after); err == nil {
 		rawConfig = string(decoded)
+	} else if decoded, err := base64.URLEncoding.DecodeString(after); err == nil {
+		rawConfig = string(decoded)
+	} else if decoded, err := base64.RawURLEncoding.DecodeString(after); err == nil {
+		rawConfig = string(decoded)
 	}
 
 	if err := json.Unmarshal([]byte(rawConfig), &vmessConfig); err != nil {
@@ -255,10 +283,15 @@ func parseVMess(u *url.URL, raw, remark string) *ParsedProxy {
 	}
 
 	host := vmessConfig.Add
-	port := vmessConfig.Port
+	port := int(vmessConfig.Port)
 	remark2 := vmessConfig.Ps
 	if remark2 == "" {
 		remark2 = remark
+	}
+
+	sni := vmessConfig.Host
+	if vmessConfig.Sni != "" {
+		sni = vmessConfig.Sni
 	}
 
 	security := "none"
@@ -273,7 +306,7 @@ func parseVMess(u *url.URL, raw, remark string) *ParsedProxy {
 		UUID:     vmessConfig.ID,
 		Security: security,
 		Network:  vmessConfig.Net,
-		SNI:      vmessConfig.Host,
+		SNI:      sni,
 		Path:     vmessConfig.Path,
 		Remark:   remark2,
 	}
@@ -411,13 +444,13 @@ func parseTUIC(u *url.URL, raw, remark string) *ParsedProxy {
 }
 
 const (
-	testHost        = "speedtest.tele2.net"
-	testPath        = "/100KB.zip"
-	testPort        = 80
-	testTimeout     = 15 * time.Second
-	xrayStartWait   = 800 * time.Millisecond
-	xrayStartLimit  = 5
-	xraySocksLimit  = 20
+	testHost       = "speed.cloudflare.com"
+	testPath       = "/__down?bytes=100000"
+	testPort       = 80
+	testTimeout    = 15 * time.Second
+	xrayStartWait  = 800 * time.Millisecond
+	xrayStartLimit = 5
+	xraySocksLimit = 20
 )
 
 var xrayPaths = []string{
@@ -550,12 +583,20 @@ func buildXrayOutbound(p ParsedProxy) map[string]interface{} {
 }
 
 func buildXrayStreamSettings(p ParsedProxy) map[string]interface{} {
+	network := p.Network
+	if network == "" {
+		network = "tcp"
+	}
+	security := p.Security
+	if security == "" {
+		security = "none"
+	}
 	settings := map[string]interface{}{
-		"network":  p.Network,
-		"security": p.Security,
+		"network":  network,
+		"security": security,
 	}
 
-	if p.Network == "ws" {
+	if network == "ws" {
 		wsSettings := map[string]interface{}{
 			"path": p.Path,
 		}
@@ -567,16 +608,16 @@ func buildXrayStreamSettings(p ParsedProxy) map[string]interface{} {
 		settings["wsSettings"] = wsSettings
 	}
 
-	if p.Security == "tls" || p.Security == "reality" {
+	if security == "tls" || security == "reality" {
 		sni := p.SNI
 		if sni == "" {
 			sni = p.Host
 		}
-		if p.Security == "tls" {
+		if security == "tls" {
 			settings["tlsSettings"] = map[string]interface{}{
 				"serverName": sni,
 			}
-		} else if p.Security == "reality" {
+		} else if security == "reality" {
 			realitySettings := map[string]interface{}{
 				"serverName":  sni,
 				"fingerprint": "chrome",
