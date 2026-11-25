@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -35,6 +36,7 @@ type ParsedProxy struct {
 	PublicKey   string `json:"publicKey,omitempty"`
 	ShortID     string `json:"shortId,omitempty"`
 	Path        string `json:"path,omitempty"`
+	Secret      string `json:"secret,omitempty"`
 	Remark      string `json:"remark,omitempty"`
 	RawURI      string `json:"rawUri"`
 }
@@ -149,8 +151,49 @@ func ParseURI(raw string) *ParsedProxy {
 		return parseHysteria2(u, raw, remark)
 	case "tuic":
 		return parseTUIC(u, raw, remark)
+	case "tg":
+		if strings.EqualFold(u.Host, "proxy") {
+			return parseTelegramProxy(u, raw, remark)
+		}
+		return nil
+	case "http", "https":
+		if isTelegramProxyLink(u) {
+			return parseTelegramProxy(u, raw, remark)
+		}
+		return nil
 	default:
 		return nil
+	}
+}
+
+func isTelegramProxyLink(u *url.URL) bool {
+	switch strings.ToLower(u.Host) {
+	case "t.me", "telegram.me", "telegram.dog":
+		return strings.HasPrefix(strings.ToLower(u.Path), "/proxy")
+	}
+	return false
+}
+
+func parseTelegramProxy(u *url.URL, raw, remark string) *ParsedProxy {
+	q := u.Query()
+	host := strings.TrimSpace(q.Get("server"))
+	secret := strings.ToLower(strings.TrimSpace(q.Get("secret")))
+	port, err := strconv.Atoi(strings.TrimSpace(q.Get("port")))
+	if host == "" || secret == "" || err != nil || port < 1 || port > 65535 {
+		return nil
+	}
+	if _, err := hex.DecodeString(secret); err != nil {
+		return nil
+	}
+	if remark == "" {
+		remark = fmt.Sprintf("MTProto %s:%d", host, port)
+	}
+	return &ParsedProxy{
+		Protocol: "mtproto",
+		Host:     host,
+		Port:     port,
+		Secret:   secret,
+		Remark:   remark,
 	}
 }
 
@@ -730,14 +773,18 @@ func TestAllWithConcurrency(proxies []ParsedProxy, batchSize int) []TestResult {
 
 	results := make([]TestResult, len(proxies))
 
-	var xrayIdxs, basicIdxs []int
-	var xrayProxies, basicProxies []ParsedProxy
+	var xrayIdxs, mtprotoIdxs, basicIdxs []int
+	var xrayProxies, mtprotoProxies, basicProxies []ParsedProxy
 
 	for i, p := range proxies {
-		if isXraySupported(p) {
+		switch {
+		case isXraySupported(p):
 			xrayProxies = append(xrayProxies, p)
 			xrayIdxs = append(xrayIdxs, i)
-		} else {
+		case p.Protocol == "mtproto":
+			mtprotoProxies = append(mtprotoProxies, p)
+			mtprotoIdxs = append(mtprotoIdxs, i)
+		default:
 			basicProxies = append(basicProxies, p)
 			basicIdxs = append(basicIdxs, i)
 		}
@@ -751,6 +798,7 @@ func TestAllWithConcurrency(proxies []ParsedProxy, batchSize int) []TestResult {
 		testXrayBatch(xrayProxies[i:end], xrayIdxs[i:end], results)
 	}
 
+	fillMTProtoResults(results, mtprotoProxies, mtprotoIdxs)
 	fillResults(results, basicProxies, basicIdxs)
 
 	return results
@@ -827,7 +875,10 @@ func ConvertWorking(proxies []ParsedProxy, results []TestResult) []SingboxOutbou
 			continue
 		}
 		outbound := proxyToSingbox(p)
-		if outbound == nil {
+		// MTProto proxies have no sing-box equivalent; keep them in the
+		// working list (nil config) so they are reported but never emitted
+		// into generated profiles.
+		if outbound == nil && p.Protocol != "mtproto" {
 			continue
 		}
 		tag := fmt.Sprintf("import-%s-%s-%d", p.Protocol, sanitizeTag(p.Host), p.Port)
